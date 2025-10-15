@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from datetime import datetime
 
 # 1. Get S&P 500 tickers
-sp500 = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]
+sp500 = pd.read_csv("https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv")
 tickers = sp500['Symbol'].tolist()
 
 def get_sma_signals(ticker):
