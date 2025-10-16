@@ -1,5 +1,4 @@
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor
 from utils.market_data import get_market_cap, get_sma_signals, check_new_high
 from config import MIN_MARKET_CAP, SP500_SOURCE
 
@@ -9,24 +8,30 @@ def run_scan():
 
     sma_signals = []
     new_highs = []
+    failed_tickers = []
 
-    def process_ticker(ticker):
-        cap = get_market_cap(ticker)
-        if cap and cap > MIN_MARKET_CAP:
+    for ticker in tickers:
+        try:
+            cap = get_market_cap(ticker)
+            if not cap or cap < MIN_MARKET_CAP:
+                continue
+
             sma = get_sma_signals(ticker)
             high = check_new_high(ticker)
-            return ticker, sma, high
-        return ticker, None, None
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(process_ticker, tickers))
+            if sma:
+                print(f"✅ SMA crossover detected: {ticker}")
+                sma_signals.append(ticker)
+            if high:
+                print(f"🔥 New 52-week high: {ticker}")
+                new_highs.append(ticker)
 
-    for ticker, sma, high in results:
-        if sma:
-            print(f"✅ SMA crossover detected: {ticker}")
-            sma_signals.append(ticker)
-        if high:
-            print(f"🔥 New 52-week high: {ticker}")
-            new_highs.append(ticker)
+        except Exception as e:
+            print(f"⚠️ Error processing {ticker}: {e}")
+            failed_tickers.append(ticker)
+            continue
+
+    if failed_tickers:
+        print(f"⚠️ Failed tickers: {failed_tickers}")
 
     return sma_signals, new_highs
