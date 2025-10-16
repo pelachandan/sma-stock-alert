@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 from utils.ledger_utils import update_sma_ledger, update_highs_ledger
 
+# ----------------- Market Cap -----------------
 def get_market_cap(ticker):
     try:
         info = yf.Ticker(ticker).info
@@ -9,6 +10,7 @@ def get_market_cap(ticker):
     except Exception:
         return 0
 
+# ----------------- SMA Signals -----------------
 def get_sma_signals(ticker):
     """
     Detects SMA crossover signals for a given ticker.
@@ -34,11 +36,22 @@ def get_sma_signals(ticker):
             today = data.iloc[i]
             yesterday = data.iloc[i - 1]
 
-            if pd.isna(today["SMA20"]) or pd.isna(today["SMA50"]) or pd.isna(today["SMA200"]):
+            # Ensure we are using scalar values
+            try:
+                sma20_today = float(today["SMA20"])
+                sma50_today = float(today["SMA50"])
+                sma200_today = float(today["SMA200"])
+                sma20_yesterday = float(yesterday["SMA20"])
+                sma50_yesterday = float(yesterday["SMA50"])
+            except Exception as e:
+                print(f"⚠️ Skipping {ticker} due to invalid SMA data: {e}")
                 continue
 
-            crossed = yesterday["SMA20"] <= yesterday["SMA50"] and today["SMA20"] > today["SMA50"]
-            cond2 = today["SMA50"] > today["SMA200"]
+            if pd.isna(sma20_today) or pd.isna(sma50_today) or pd.isna(sma200_today):
+                continue
+
+            crossed = (sma20_yesterday <= sma50_yesterday) and (sma20_today > sma50_today)
+            cond2 = sma50_today > sma200_today
 
             if crossed and cond2:
                 crossover_date = today.name
@@ -51,9 +64,9 @@ def get_sma_signals(ticker):
                 # Only keep stocks that have risen 5–10% since crossover
                 if 5 <= pct_from_crossover <= 10:
                     crossover_info = {
-                        "SMA20": today["SMA20"],
-                        "SMA50": today["SMA50"],
-                        "SMA200": today["SMA200"],
+                        "SMA20": sma20_today,
+                        "SMA50": sma50_today,
+                        "SMA200": sma200_today,
                         "CrossoverDate": crossover_date,
                     }
                     update_sma_ledger(ticker, crossover_info)
@@ -66,10 +79,12 @@ def get_sma_signals(ticker):
                     return ticker
 
         return None
+
     except Exception as e:
         print(f"Error in {ticker}: {e}")
         return None
 
+# ----------------- New Highs -----------------
 def check_new_high(ticker):
     try:
         data = yf.download(ticker, period="1y", interval="1d", progress=False)
