@@ -41,7 +41,7 @@ def run_scan(test_mode=False):
         try:
             sma_result = get_sma_signals(ticker)
             if sma_result:
-                sma_signals.append(ticker)
+                sma_signals.append(sma_result)
         except Exception as e:
             print(f"⚠️ [scanner.py] Error processing SMA for {ticker}: {e}")
 
