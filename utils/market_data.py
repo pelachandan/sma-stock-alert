@@ -10,37 +10,64 @@ def get_market_cap(ticker):
         return 0
 
 def get_sma_signals(ticker):
+    """
+    Detects SMA crossover signals for a given ticker.
+
+    Logic:
+      1. Identify SMA20 crossing above SMA50 within the last 20 trading days.
+      2. Ensure SMA50 > SMA200 (trend confirmation).
+      3. Verify current Close is 5–10% higher than the crossover day's Close.
+      4. Logs and returns the ticker if all conditions are met.
+    """
     try:
         data = yf.download(ticker, period="1y", interval="1d", progress=False)
         if len(data) < 200:
             return None
 
+        # Compute moving averages
         data["SMA20"] = data["Close"].rolling(20).mean()
         data["SMA50"] = data["Close"].rolling(50).mean()
         data["SMA200"] = data["Close"].rolling(200).mean()
 
-        for i in range(-10, 0):
+        # Look back up to 20 trading days for a recent crossover
+        for i in range(-20, 0):
             today = data.iloc[i]
             yesterday = data.iloc[i - 1]
+
             if pd.isna(today["SMA20"]) or pd.isna(today["SMA50"]) or pd.isna(today["SMA200"]):
                 continue
 
             crossed = yesterday["SMA20"] <= yesterday["SMA50"] and today["SMA20"] > today["SMA50"]
             cond2 = today["SMA50"] > today["SMA200"]
-            diff_pct = (today["SMA20"] - today["SMA50"]) / today["SMA50"] * 100
 
-            # Less strict diff threshold so more signals appear
-            if crossed and cond2 and diff_pct >= 1:
-                crossover_info = {
-                    "SMA20": today["SMA20"],
-                    "SMA50": today["SMA50"],
-                    "SMA200": today["SMA200"],
-                    "CrossoverDate": today.name,
-                }
-                update_sma_ledger(ticker, crossover_info)
-                return ticker
+            if crossed and cond2:
+                crossover_date = today.name
+                crossover_price = today["Close"]
+
+                # Get current price
+                current_price = data.iloc[-1]["Close"]
+                pct_from_crossover = (current_price - crossover_price) / crossover_price * 100
+
+                # Only keep stocks that have risen 5–10% since crossover
+                if 5 <= pct_from_crossover <= 10:
+                    crossover_info = {
+                        "SMA20": today["SMA20"],
+                        "SMA50": today["SMA50"],
+                        "SMA200": today["SMA200"],
+                        "CrossoverDate": crossover_date,
+                    }
+                    update_sma_ledger(ticker, crossover_info)
+
+                    print(
+                        f"✅ {ticker}: SMA crossover {pct_from_crossover:.2f}% above crossover price "
+                        f"on {crossover_date.date()}"
+                    )
+
+                    return ticker
+
         return None
-    except Exception:
+    except Exception as e:
+        print(f"Error in {ticker}: {e}")
         return None
 
 def check_new_high(ticker):
