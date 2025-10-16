@@ -1,21 +1,22 @@
-from .historical_data import download_historical
-from .ledger_utils import update_highs_ledger
+import pandas as pd
+from utils.market_data import get_historical_data
+from utils.ledger_utils import update_highs_ledger
 
 def check_new_high(ticker):
+    """
+    Checks if current closing price is a new 52-week (2-year) high.
+    """
     try:
-        data = download_historical(ticker)
-        if data.empty:
+        df = get_historical_data(ticker)
+        if df.empty or 'Close' not in df.columns:
             return None
 
-        # Ensure Close is numeric
-        data['Close'] = pd.to_numeric(data['Close'], errors='coerce')
-        data = data.dropna(subset=['Close'])
-
-        max_close = data['Close'].max()
-        close_today = data['Close'].iloc[-1]
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+        max_close = df['Close'].max()
+        close_today = df['Close'].iloc[-1]
 
         if close_today >= max_close:
-            update_highs_ledger(ticker, close_today, data.index[-1])
+            update_highs_ledger(ticker, close_today, df.index[-1])
             return ticker
         return None
     except Exception as e:
