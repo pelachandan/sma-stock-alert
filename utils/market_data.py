@@ -117,9 +117,13 @@ def check_new_high(ticker):
 
         today = data.iloc[-1]
         max_close = data["Close"].max()
-        if today["Close"] >= max_close:
-            update_highs_ledger(ticker, today["Close"], today.name)
-            print(f"🔥 {ticker}: New 52-week high at {today['Close']}")
+
+        # Ensure scalar for comparison
+        close_today = today["Close"].iloc[0] if isinstance(today["Close"], pd.Series) else today["Close"]
+
+        if close_today >= max_close:
+            update_highs_ledger(ticker, close_today, today.name)
+            print(f"🔥 {ticker}: New 52-week high at {close_today}")
             return ticker
 
         return None
