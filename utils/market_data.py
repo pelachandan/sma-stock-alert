@@ -1,6 +1,6 @@
 from pathlib import Path
 import pandas as pd
-from historical_data import download_historical
+from .historical_data import download_historical
 
 HISTORICAL_FOLDER = Path("historical_data")
 
