@@ -1,7 +1,8 @@
 import time
 import pandas as pd
 from config import MIN_MARKET_CAP, SP500_SOURCE
-from utils.market_data import get_market_cap, get_sma_signals, check_new_high
+from utils.market_data import get_market_cap, check_new_high
+from utils.sma_signals import get_sma_signals
 
 BACKOFF_BASE = 2
 MAX_RETRIES = 5
