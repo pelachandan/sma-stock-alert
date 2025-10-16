@@ -1,17 +1,19 @@
 import yfinance as yf
 import pandas as pd
+import os
 import time
 import random
 import traceback
 from utils.ledger_utils import update_sma_ledger, update_highs_ledger
 
+HISTORICAL_FOLDER = "historical_data"
+os.makedirs(HISTORICAL_FOLDER, exist_ok=True)
+
 # ----------------- Helper -----------------
 def scalar(val):
     """
-    Convert a pandas Series, numpy scalar, or pandas NA to a Python float/int.
-    - Single-element Series -> returns the element
-    - Multi-element Series -> returns the max as a safe fallback
-    - NaN or NA -> returns None
+    Ensure yfinance values are interpreted correctly as a scalar float.
+    Handles Series, None, and NaN.
     """
     if val is None:
         return None
@@ -38,7 +40,7 @@ def get_market_cap(ticker):
         return 0
 
 # ----------------- Download Data with Exponential Backoff -----------------
-def download_data(ticker, period="1y", interval="1d", max_retries=5, base_delay=2):
+def download_data(ticker, period="2y", interval="1d", max_retries=5, base_delay=2):
     delay = base_delay
     for attempt in range(max_retries):
         try:
@@ -51,8 +53,7 @@ def download_data(ticker, period="1y", interval="1d", max_retries=5, base_delay=
                 threads=False
             )
             if not data.empty:
-                # small random delay to avoid throttling
-                time.sleep(random.uniform(1, 3))
+                time.sleep(random.uniform(1, 2))
                 return data
         except Exception as e:
             print(f"⚠️ [market_data.py] Attempt {attempt+1} failed for {ticker}: {e}")
@@ -61,14 +62,43 @@ def download_data(ticker, period="1y", interval="1d", max_retries=5, base_delay=
     print(f"❌ [market_data.py] Failed to download data for {ticker} after {max_retries} attempts.")
     return pd.DataFrame()
 
+# ----------------- Historical Data Storage -----------------
+def get_historical_data(ticker):
+    file_path = os.path.join(HISTORICAL_FOLDER, f"{ticker}.csv")
+
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path, index_col=0, parse_dates=True)
+        last_date = df.index.max()
+        today = pd.Timestamp.today().normalize()
+        # Only download missing days
+        if (today - last_date).days > 0:
+            new_data = yf.download(
+                ticker,
+                start=(last_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                end=today.strftime("%Y-%m-%d"),
+                progress=False,
+                auto_adjust=True,
+                threads=False
+            )
+            if not new_data.empty:
+                df = pd.concat([df, new_data])
+                df = df[~df.index.duplicated(keep="last")]
+                df.to_csv(file_path)
+        return df
+    else:
+        # First-time download full 2-year data
+        df = download_data(ticker, period="2y", interval="1d")
+        if not df.empty:
+            df.to_csv(file_path)
+        return df
+
 # ----------------- SMA Signals -----------------
 def get_sma_signals(ticker):
     try:
-        data = download_data(ticker)
+        data = get_historical_data(ticker)
         if data.empty or len(data) < 200:
             return None
 
-        # Compute moving averages
         data["SMA20"] = data["Close"].rolling(20).mean()
         data["SMA50"] = data["Close"].rolling(50).mean()
         data["SMA200"] = data["Close"].rolling(200).mean()
@@ -103,7 +133,6 @@ def get_sma_signals(ticker):
 
                 pct_from_crossover = (current_price - crossover_price) / crossover_price * 100
 
-                # Only keep stocks that have risen 5–10% since crossover
                 if 5 <= pct_from_crossover <= 10:
                     crossover_info = {
                         "SMA20": sma20_today,
@@ -126,7 +155,7 @@ def get_sma_signals(ticker):
 # ----------------- 52-week High -----------------
 def check_new_high(ticker):
     try:
-        data = download_data(ticker)
+        data = get_historical_data(ticker)
         if data.empty:
             return None
 
