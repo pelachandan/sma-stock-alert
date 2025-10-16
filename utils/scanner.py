@@ -8,10 +8,14 @@ from utils.highs import check_new_high
 BACKOFF_BASE = 2
 MAX_RETRIES = 5
 
-def run_scan():
+def run_scan(test_mode=False):
     """Scan S&P 500 tickers for SMA crossovers and 52-week highs."""
     sp500 = pd.read_csv(SP500_SOURCE)
     tickers = sp500["Symbol"].tolist()
+
+     # Only take first 10-15 tickers in test mode
+    if test_mode:
+        tickers = tickers[:15]  # adjust number as needed
 
     sma_signals = []
     new_highs = []
