@@ -9,47 +9,60 @@ HISTORICAL_FOLDER.mkdir(exist_ok=True)
 
 def download_historical(ticker, period="2y", interval="1d", max_retries=5):
     """
-    Downloads historical data sequentially with exponential backoff.
-    Automatically handles yfinance's '_<TICKER>' column suffix pattern.
+    Downloads historical stock data with exponential backoff and caching.
+    Handles all known yfinance column naming variants:
+      - 'Close'
+      - 'Close_<TICKER>'
+      - '<TICKER>_Close'
     """
     for attempt in range(1, max_retries + 1):
         try:
+            # --- Download from yfinance ---
             data = yf.download(
                 ticker,
                 period=period,
                 interval=interval,
                 progress=False,
                 auto_adjust=False,
-                group_by='ticker'
+                group_by="ticker"
             )
 
-            # --- Handle Series case ---
+            # --- Handle unexpected Series ---
             if isinstance(data, pd.Series):
                 data = data.to_frame().T
 
-            # --- Flatten MultiIndex ---
+            # --- Flatten MultiIndex columns ---
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = ['_'.join(col).strip() for col in data.columns.values]
 
-            # --- Fix suffix issue like "Close_MMM" ---
-            suffix = f"_{ticker.upper()}"
-            renamed_cols = {col: col.replace(suffix, '') for col in data.columns if col.endswith(suffix)}
+            cols_before = list(data.columns)
+
+            # --- Try to normalize prefixes/suffixes ---
+            tkr_upper = ticker.upper()
+            renamed_cols = {}
+
+            for col in cols_before:
+                if col.startswith(tkr_upper + "_"):
+                    renamed_cols[col] = col.replace(tkr_upper + "_", "")
+                elif col.endswith("_" + tkr_upper):
+                    renamed_cols[col] = col.replace("_" + tkr_upper, "")
+
             if renamed_cols:
                 data = data.rename(columns=renamed_cols)
 
-            # --- Validate 'Close' column ---
-            if 'Close' not in data.columns:
+            # --- Validate ---
+            if "Close" not in data.columns:
                 print(f"⚠️ [historical_data.py] {ticker}: Missing 'Close' column. Columns found: {list(data.columns)}")
                 raise ValueError("Missing 'Close' column")
 
-            # --- Clean numeric data ---
-            numeric_cols = [c for c in ['Open','High','Low','Close','Adj Close','Volume'] if c in data.columns]
-            data = data[numeric_cols].apply(pd.to_numeric, errors='coerce').dropna(subset=['Close'])
+            # --- Clean numeric columns ---
+            numeric_cols = [c for c in ["Open","High","Low","Close","Adj Close","Volume"] if c in data.columns]
+            data = data[numeric_cols].apply(pd.to_numeric, errors="coerce").dropna(subset=["Close"])
 
             if data.empty:
                 raise ValueError("No valid price data after cleaning")
 
-            # --- Cache logic ---
+            # --- Save or update cached file ---
             file_path = HISTORICAL_FOLDER / f"{ticker}.csv"
             if file_path.exists():
                 try:
@@ -58,13 +71,13 @@ def download_historical(ticker, period="2y", interval="1d", max_retries=5):
                     if not new_data.empty:
                         updated = pd.concat([cached, new_data]).sort_index()
                         updated.to_csv(file_path)
-                        print(f"✅ [historical_data.py] Updated cache for {ticker}, added {len(new_data)} rows.")
+                        print(f"✅ [historical_data.py] Updated cache for {ticker}: +{len(new_data)} rows")
                         return updated
                     else:
-                        print(f"ℹ️ [historical_data.py] No new data for {ticker}. Using cached.")
+                        print(f"ℹ️ [historical_data.py] No new data for {ticker}, using cached.")
                         return cached
                 except Exception as e:
-                    print(f"⚠️ [historical_data.py] Error reading cache for {ticker}: {e}. Overwriting.")
+                    print(f"⚠️ [historical_data.py] Cache read error for {ticker}: {e}. Overwriting.")
                     data.to_csv(file_path)
                     return data
             else:
