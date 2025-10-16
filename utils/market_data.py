@@ -5,16 +5,39 @@ import random
 import traceback
 from utils.ledger_utils import update_sma_ledger, update_highs_ledger
 
+# ----------------- Helper -----------------
+def scalar(val):
+    """
+    Convert a pandas Series, numpy scalar, or pandas NA to a Python float/int.
+    - Single-element Series -> returns the element
+    - Multi-element Series -> returns the max as a safe fallback
+    - NaN or NA -> returns None
+    """
+    if val is None:
+        return None
+    if isinstance(val, pd.Series):
+        val = val.dropna()
+        if len(val) == 0:
+            return None
+        elif len(val) == 1:
+            return val.iloc[0]
+        else:
+            return val.max()
+    if pd.isna(val):
+        return None
+    return float(val)
+
 # ----------------- Market Cap -----------------
 def get_market_cap(ticker):
     try:
         info = yf.Ticker(ticker).info
-        return info.get("marketCap", 0)
+        cap = info.get("marketCap", 0)
+        return scalar(cap)
     except Exception as e:
         print(f"⚠️ [market_data.py] Error fetching market cap for {ticker}: {e}")
         return 0
 
-# ----------------- Helper: download with exponential backoff -----------------
+# ----------------- Download Data with Exponential Backoff -----------------
 def download_data(ticker, period="1y", interval="1d", max_retries=5, base_delay=2):
     delay = base_delay
     for attempt in range(max_retries):
@@ -28,6 +51,7 @@ def download_data(ticker, period="1y", interval="1d", max_retries=5, base_delay=
                 threads=False
             )
             if not data.empty:
+                # small random delay to avoid throttling
                 time.sleep(random.uniform(1, 3))
                 return data
         except Exception as e:
@@ -44,7 +68,7 @@ def get_sma_signals(ticker):
         if data.empty or len(data) < 200:
             return None
 
-        # Compute SMAs
+        # Compute moving averages
         data["SMA20"] = data["Close"].rolling(20).mean()
         data["SMA50"] = data["Close"].rolling(50).mean()
         data["SMA200"] = data["Close"].rolling(200).mean()
@@ -54,16 +78,17 @@ def get_sma_signals(ticker):
             yesterday = data.iloc[i - 1]
 
             try:
-                sma20_today = today["SMA20"].iloc[0] if isinstance(today["SMA20"], pd.Series) else today["SMA20"]
-                sma50_today = today["SMA50"].iloc[0] if isinstance(today["SMA50"], pd.Series) else today["SMA50"]
-                sma200_today = today["SMA200"].iloc[0] if isinstance(today["SMA200"], pd.Series) else today["SMA200"]
-                sma20_yesterday = yesterday["SMA20"].iloc[0] if isinstance(yesterday["SMA20"], pd.Series) else yesterday["SMA20"]
-                sma50_yesterday = yesterday["SMA50"].iloc[0] if isinstance(yesterday["SMA50"], pd.Series) else yesterday["SMA50"]
+                sma20_today = scalar(today["SMA20"])
+                sma50_today = scalar(today["SMA50"])
+                sma200_today = scalar(today["SMA200"])
+                sma20_yesterday = scalar(yesterday["SMA20"])
+                sma50_yesterday = scalar(yesterday["SMA50"])
+                close_today = scalar(today["Close"])
             except Exception as e:
                 print(f"⚠️ [market_data.py] SMA conversion error for {ticker}: {e}")
                 continue
 
-            if pd.isna(sma20_today) or pd.isna(sma50_today) or pd.isna(sma200_today):
+            if None in [sma20_today, sma50_today, sma200_today, sma20_yesterday, sma50_yesterday, close_today]:
                 continue
 
             crossed = (sma20_yesterday <= sma50_yesterday) and (sma20_today > sma50_today)
@@ -71,10 +96,14 @@ def get_sma_signals(ticker):
 
             if crossed and cond2:
                 crossover_date = today.name
-                crossover_price = today["Close"].iloc[0] if isinstance(today["Close"], pd.Series) else today["Close"]
-                current_price = data["Close"].iloc[-1]
+                crossover_price = close_today
+                current_price = scalar(data["Close"].iloc[-1])
+                if current_price is None:
+                    continue
+
                 pct_from_crossover = (current_price - crossover_price) / crossover_price * 100
 
+                # Only keep stocks that have risen 5–10% since crossover
                 if 5 <= pct_from_crossover <= 10:
                     crossover_info = {
                         "SMA20": sma20_today,
@@ -102,10 +131,11 @@ def check_new_high(ticker):
             return None
 
         today = data.iloc[-1]
-        max_close = data["Close"].max()
+        close_today = scalar(today["Close"])
+        max_close = scalar(data["Close"].max())
 
-        # Ensure scalar for comparison
-        close_today = today["Close"].iloc[0] if isinstance(today["Close"], pd.Series) else today["Close"]
+        if None in [close_today, max_close]:
+            return None
 
         if close_today >= max_close:
             update_highs_ledger(ticker, close_today, today.name)
