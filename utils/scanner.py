@@ -9,23 +9,22 @@ BACKOFF_BASE = 2
 MAX_RETRIES = 5
 
 def run_scan(test_mode=False):
-    """Scan S&P 500 tickers for SMA crossovers and 52-week highs."""
+    """
+    Runs the complete SMA crossover + 52-week high scan.
+    Sequential, with exponential backoff and retry.
+    """
+    print("🚀 Running SMA crossover and 52-week high scan...")
+
     sp500 = pd.read_csv(SP500_SOURCE)
     tickers = sp500["Symbol"].tolist()
-
-     # Only take first 10-15 tickers in test mode
     if test_mode:
-        tickers = tickers[:15]  # adjust number as needed
+        tickers = tickers[:15]
 
-    sma_signals = []
-    new_highs = []
+    sma_signals, new_highs = [], []
 
     for ticker in tickers:
-        # -------------------
-        # Step 1: Get Market Cap
-        # -------------------
-        attempt = 0
-        market_cap = None
+        # --- Market Cap Check ---
+        attempt, market_cap = 0, None
         while attempt < MAX_RETRIES:
             market_cap = get_market_cap(ticker)
             if market_cap and market_cap > MIN_MARKET_CAP:
@@ -35,12 +34,10 @@ def run_scan(test_mode=False):
             time.sleep(wait)
             attempt += 1
         else:
-            print(f"⚠️ [scanner.py] Skipping {ticker} due to low or missing market cap")
+            print(f"⚠️ [scanner.py] Skipping {ticker} due to low/missing market cap")
             continue
 
-        # -------------------
-        # Step 2: SMA Signals
-        # -------------------
+        # --- SMA Signal ---
         try:
             sma_result = get_sma_signals(ticker)
             if sma_result:
@@ -48,9 +45,7 @@ def run_scan(test_mode=False):
         except Exception as e:
             print(f"⚠️ [scanner.py] Error processing SMA for {ticker}: {e}")
 
-        # -------------------
-        # Step 3: 52-week Highs
-        # -------------------
+        # --- 52-Week High ---
         try:
             high_result = check_new_high(ticker)
             if high_result:
@@ -58,8 +53,7 @@ def run_scan(test_mode=False):
         except Exception as e:
             print(f"⚠️ [scanner.py] Error processing new high for {ticker}: {e}")
 
-    print("🚀 Scan completed!")
-    print(f"✅ SMA Crossovers: {sma_signals}")
+    print("✅ Scan completed!")
+    print(f"📈 SMA Crossovers: {sma_signals}")
     print(f"🔥 New 52-week Highs: {new_highs}")
-
     return sma_signals, new_highs
