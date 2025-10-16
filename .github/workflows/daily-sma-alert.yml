@@ -30,3 +30,9 @@ jobs:
       - name: Run stock alert scan
         run: |
           python main.py
+
+      - name: Upload historical data
+        uses: actions/upload-artifact@v3
+        with:
+          name: historical-data
+          path: historical_data/
