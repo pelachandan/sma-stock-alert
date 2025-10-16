@@ -1,3 +1,6 @@
+import pandas as pd
+from utils.market_data import get_historical_data
+
 def get_sma_signals(ticker):
     df = get_historical_data(ticker)
     if df.empty or len(df) < 200:
