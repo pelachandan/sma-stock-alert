@@ -5,14 +5,13 @@ if __name__ == "__main__":
     print("🚀 Running SMA crossover and 52-week high scan...")
     sma_list, high_list = run_scan()
 
-    print("\n📈 SMA Signals:", sma_list)
-    print("🏆 New Highs:", high_list)
+    print("\n📈 SMA Signals:")
+    for s in sma_list:
+        print(
+            f"  {s['ticker']} - {s['PctAbove']}% above crossover "
+            f"(Crossed on {s['CrossoverDate']})"
+        )
 
-    # Combined summary email
-    summary = ""
-    if sma_list:
-        summary += "SMA Crossovers:\n" + "\n".join(sma_list) + "\n\n"
-    if high_list:
-        summary += "New 52-week Highs:\n" + "\n".join(high_list)
+    print("\n🏆 New Highs:", high_list or "None")
 
-    send_email_alert([], subject_prefix="Market Summary", custom_body=summary or "No signals today.")
+    send_email_alert(sma_list, high_list)
