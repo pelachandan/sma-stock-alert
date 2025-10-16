@@ -21,3 +21,26 @@ def send_email_alert(symbols, subject_prefix="Daily Alert", custom_body=None):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
+
+def format_email(sma_signals, new_highs):
+    body = ""
+
+    if sma_signals:
+        body += "📈 **SMA Crossover Signals**\n\n"
+        for s in sma_signals:
+            body += (
+                f"- {s['ticker']}: +{s['PctAbove']}% above crossover "
+                f"(Crossed on {s['CrossoverDate']}, "
+                f"from ${s['CrossoverPrice']} → ${s['CurrentPrice']})\n"
+            )
+        body += "\n"
+
+    if new_highs:
+        body += "🚀 **New 52-Week Highs**\n\n"
+        for ticker in new_highs:
+            body += f"- {ticker}\n"
+
+    if not body:
+        body = "No new signals today."
+
+    return body
