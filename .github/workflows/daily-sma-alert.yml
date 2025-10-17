@@ -31,8 +31,16 @@ jobs:
         run: |
           python main.py
 
+      # 🗂️ Upload historical data for traceability
       - name: Upload historical data
         uses: actions/upload-artifact@v4
         with:
           name: historical-data
           path: historical_data/
+
+      # 📈 Upload EMA cache data (incrementally updated daily)
+      - name: Upload EMA data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ema-data
+          path: ema_data/
