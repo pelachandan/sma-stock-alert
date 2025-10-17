@@ -16,7 +16,7 @@ def load_ledger(file):
         if 'ledger' in file:
             return pd.DataFrame(columns=['Ticker', 'SMA20', 'SMA50', 'SMA200', 'CrossoverDate'])
         else:
-            return pd.DataFrame(columns=['Ticker', 'Close', 'HighDate'])
+            return pd.DataFrame(columns=["Ticker", "Company", "Close", "HighDate"])
 
 def save_ledger(df, file):
     df.to_csv(file, index=False)
