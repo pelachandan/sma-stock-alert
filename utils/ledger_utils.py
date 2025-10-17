@@ -47,19 +47,20 @@ def update_sma_ledger(ticker, crossover_info):
     return ledger
 
 # ----------------- Highs Ledger -----------------
-def update_highs_ledger(ticker, close, date):
+def update_highs_ledger(ticker, company, close, date):
     highs_ledger = load_ledger(HIGHS_LEDGER_FILE)
 
-    if ticker in highs_ledger['Ticker'].values:
-        return highs_ledger
+    if ticker in highs_ledger["Ticker"].values:
+        return highs_ledger  # already recorded
 
     new_row = {
         "Ticker": ticker,
+        "Company": company,
         "Close": close,
         "HighDate": date
     }
 
-    new_df = pd.DataFrame([new_row]).dropna(axis=1, how='all')
+    new_df = pd.DataFrame([new_row]).dropna(axis=1, how="all")
     highs_ledger = pd.concat([highs_ledger, new_df], ignore_index=True)
     save_ledger(highs_ledger, HIGHS_LEDGER_FILE)
     return highs_ledger
