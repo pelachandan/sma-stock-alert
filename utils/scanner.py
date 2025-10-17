@@ -2,7 +2,7 @@ import time
 import pandas as pd
 from config import MIN_MARKET_CAP, SP500_SOURCE
 from utils.market_data import get_market_cap
-from utils.sma_signals import get_sma_signals
+from utils.ema_signals import get_ema_signals
 from utils.highs import check_new_high
 
 BACKOFF_BASE = 2
@@ -37,11 +37,11 @@ def run_scan(test_mode=False):
             print(f"⚠️ [scanner.py] Skipping {ticker} due to low/missing market cap")
             continue
 
-        # --- SMA Signal ---
+        # --- EMA Signal ---
         try:
-            sma_result = get_sma_signals(ticker)
-            if sma_result:
-                sma_signals.append(sma_result)
+            ema_result = get_ema_signals(ticker)
+            if ema_result:
+                ema_signals.append(ema_result)
         except Exception as e:
             print(f"⚠️ [scanner.py] Error processing SMA for {ticker}: {e}")
 
@@ -54,6 +54,6 @@ def run_scan(test_mode=False):
             print(f"⚠️ [scanner.py] Error processing new high for {ticker}: {e}")
 
     print("✅ Scan completed!")
-    print(f"📈 SMA Crossovers: {sma_signals}")
+    print(f"📈 SMA Crossovers: {ema_signals}")
     print(f"🔥 New 52-week Highs: {new_highs}")
-    return sma_signals, new_highs
+    return ema_signals, new_highs
