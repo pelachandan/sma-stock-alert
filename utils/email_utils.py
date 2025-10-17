@@ -24,8 +24,10 @@ def format_summary(sma_list, high_list):
 
     if high_list:
         summary += "🚀 **New 52-Week Highs**\n\n"
-        for ticker in high_list:
-            summary += f"- {ticker}\n"
+        for h in high_list:
+            summary += (
+                f"- {h['Ticker']} ({h['Company']}): ${h['Close']} on {h['HighDate']}\n"
+            )
 
     if not summary:
         summary = "No new signals today."
