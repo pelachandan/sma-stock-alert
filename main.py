@@ -2,8 +2,8 @@ from utils.scanner import run_scan
 from utils.email_utils import send_email_alert
 
 if __name__ == "__main__":
-    print("🚀 Running SMA crossover and 52-week high scan...")
-    sma_list, high_list = run_scan(test_mode=True)
+    print("🚀 Running EMA crossover and 52-week high scan...")
+    ema_list, high_list = run_scan(test_mode=True)
     
     for s in sma_list:
         print(
@@ -13,4 +13,4 @@ if __name__ == "__main__":
 
     print("\n🏆 New Highs:", high_list or "None")
 
-    send_email_alert(sma_list, high_list)
+    send_email_alert(ema_list, high_list)
