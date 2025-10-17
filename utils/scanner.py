@@ -49,7 +49,7 @@ def run_scan(test_mode=False):
         try:
             high_result = check_new_high(ticker)
             if high_result:
-                new_highs.append(ticker)
+                new_highs.append(high_result)
         except Exception as e:
             print(f"⚠️ [scanner.py] Error processing new high for {ticker}: {e}")
 
