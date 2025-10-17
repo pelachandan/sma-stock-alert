@@ -3,15 +3,15 @@ import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime
 
-def format_summary(sma_list, high_list):
+def format_summary(ema_list, high_list):
     """
     Builds a detailed summary for email content.
     """
     summary = ""
 
-    if sma_list:
-        summary += "📈 **SMA Crossovers (5–10% above crossover)**\n\n"
-        for s in sma_list:
+    if ema_list:
+        summary += "📈 **EMA Crossovers (5–10% above crossover)**\n\n"
+        for s in ema_list:
             trend_tag = (
                 "🔥 Strong Momentum" if s["PctAbove"] >= 8 else "⚡ Steady Trend"
             )
@@ -35,11 +35,11 @@ def format_summary(sma_list, high_list):
     return summary
 
 
-def send_email_alert(sma_list, high_list, subject_prefix="📊 Market Summary", custom_body=None):
+def send_email_alert(ema_list, high_list, subject_prefix="📊 Market Summary", custom_body=None):
     """
-    Sends an email with either a custom body or formatted summary of SMA and high signals.
+    Sends an email with either a custom body or formatted summary of EMA and high signals.
     """
-    body = custom_body or format_summary(sma_list, high_list)
+    body = custom_body or format_summary(ema_list, high_list)
 
     sender = os.getenv("EMAIL_SENDER")
     receiver = os.getenv("EMAIL_RECEIVER")
