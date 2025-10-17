@@ -20,7 +20,7 @@ def run_scan(test_mode=False):
     if test_mode:
         tickers = tickers[:15]
 
-    sma_signals, new_highs = [], []
+    ema_signals, new_highs = [], []
 
     for ticker in tickers:
         # --- Market Cap Check ---
@@ -54,6 +54,6 @@ def run_scan(test_mode=False):
             print(f"⚠️ [scanner.py] Error processing new high for {ticker}: {e}")
 
     print("✅ Scan completed!")
-    print(f"📈 SMA Crossovers: {ema_signals}")
+    print(f"📈 EMA Crossovers: {ema_signals}")
     print(f"🔥 New 52-week Highs: {new_highs}")
     return ema_signals, new_highs
