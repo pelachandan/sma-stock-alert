@@ -2497,8 +2497,12 @@ class RallyPatternStrategy:
         )
 
     def _zone_reentry_signal(self, scored: pd.DataFrame) -> pd.Series:
+        leadership_reentry_ok = (
+            scored["confirmed_leader_regime_signal"].astype(bool)
+            | scored["emerging_leader_regime_signal"].astype(bool)
+        )
         return (
-            scored["leader_regime_signal"].astype(bool)
+            leadership_reentry_ok
             & (scored["score"] >= self.add_on_min_score)
             & (scored["trend_stack_bullish"] == 1)
             & (scored["close_vs_ema_20"] > 0)

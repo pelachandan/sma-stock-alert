@@ -651,6 +651,30 @@ def test_generate_entries_triggers_emerging_leader_ignition_for_explosive_launch
     assert bool(entry_view.iloc[-1]["entry_signal"])
 
 
+def test_zone_reentry_signal_allows_emerging_leader_followthrough():
+    strategy = RallyPatternStrategy()
+    scored = pd.DataFrame(
+        [
+            {
+                "confirmed_leader_regime_signal": False,
+                "emerging_leader_regime_signal": True,
+                "score": strategy.add_on_min_score,
+                "trend_stack_bullish": 1,
+                "close_vs_ema_20": 0.04,
+                "close_vs_sma_50": 0.03,
+                "rs_spy_20": 0.02,
+                "rs_qqq_20": 0.01,
+                "zone_width_20": strategy.zone_max_width_20 - 0.01,
+                "close_to_prior_20bar_high": -0.01,
+            }
+        ]
+    )
+
+    signal = strategy._zone_reentry_signal(scored)
+
+    assert bool(signal.iloc[0])
+
+
 def test_generate_entries_and_exits_follow_exact_rules():
     strategy = RallyPatternStrategy()
     df = pd.DataFrame(
