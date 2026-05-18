@@ -284,6 +284,10 @@ class RallyPatternPosition(BaseStrategy):
 
         setup_type = str(row.get("setup_type", "none"))
         score = float(row["score"])
+        leadership_stage = str(row.get("leadership_stage", "none"))
+        if leadership_stage == "none":
+            leadership_stage = "emerging" if setup_type.startswith("emerging_") else "confirmed"
+        position_size_multiplier = self.strategy.starter_size_multiplier(setup_type)
         zone_support = float(self.strategy._entry_zone_support_level(row, setup_type))
         target = entry + (self.target_r_multiple * (entry - stop))
         signal_date = pd.Timestamp(row["Date"])
@@ -303,6 +307,8 @@ class RallyPatternPosition(BaseStrategy):
             "EntryScore": round(score, 2),
             "SetupType": setup_type,
             "SignalType": setup_type,
+            "LeadershipStage": leadership_stage,
+            "PositionSizeMultiplier": round(position_size_multiplier, 4),
             "ZoneSupport": round(zone_support, 2),
             "Volume": int(float(row.get("volume", 0.0))),
             "Date": signal_date,

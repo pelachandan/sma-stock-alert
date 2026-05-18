@@ -129,6 +129,35 @@ def _emerging_row(date: str, ticker: str, close: float = 100.0) -> dict:
     return row
 
 
+def _emerging_ignition_row(date: str, ticker: str, close: float = 100.0) -> dict:
+    row = _emerging_row(date, ticker, close)
+    row.update(
+        {
+            "close_vs_sma_50": 0.12,
+            "close_vs_ema_20": 0.16,
+            "pct_from_20d_high": 0.0,
+            "donchian_pos_20": 0.94,
+            "bb_pct_b_20": 0.98,
+            "pct_chg": 0.065,
+            "close_pos": 0.92,
+            "volume_ratio_20": 2.10,
+            "volume_ratio_50": 1.40,
+            "volume_zscore_20": 2.40,
+            "rs_spy_20": 0.10,
+            "rs_qqq_20": 0.11,
+            "lr_r2_63": 0.38,
+            "base_width_20": 0.18,
+            "base_tightness_20": 0.70,
+            "close_to_prior_20bar_high": 0.055,
+            "support_cluster_gap": 0.16,
+        }
+    )
+    row["open"] = close - 4.5
+    row["high"] = close + 1.0
+    row["low"] = close - 5.0
+    return row
+
+
 def _continuation_row(date: str, ticker: str, close: float = 100.0) -> dict:
     row = _strong_row(date, ticker, close)
     row.update(
@@ -586,6 +615,39 @@ def test_generate_entries_triggers_emerging_leader_shelf_after_base_tightening()
     assert entry_view.iloc[-1]["leadership_stage"] == "emerging"
     assert entry_view.iloc[-1]["setup_type"] == "emerging_leader_shelf"
     assert entry_view.iloc[-1]["setup_state"] == "entered"
+    assert bool(entry_view.iloc[-1]["entry_signal"])
+
+
+def test_generate_entries_triggers_emerging_leader_ignition_for_explosive_launch():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.5),
+        _emerging_row("2024-01-03", "AAA", 100.0),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_ignition_row("2024-01-05", "AAA", 107.5),
+    ]
+    rows[0]["high"] = 100.2
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.1
+    rows[3]["high"] = 108.4
+    rows[0]["low"] = 98.8
+    rows[1]["low"] = 99.3
+    rows[2]["low"] = 99.8
+    rows[3]["low"] = 102.0
+    rows[0]["rs_qqq_20"] = 0.012
+    rows[1]["rs_qqq_20"] = 0.020
+    rows[2]["rs_qqq_20"] = 0.032
+    rows[3]["rs_qqq_20"] = 0.110
+    rows[0]["rs_spy_20"] = 0.008
+    rows[1]["rs_spy_20"] = 0.012
+    rows[2]["rs_spy_20"] = 0.020
+    rows[3]["rs_spy_20"] = 0.095
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "leadership_stage", "setup_type", "entry_signal"]]
+
+    assert entry_view.iloc[-1]["leadership_stage"] == "emerging"
+    assert entry_view.iloc[-1]["setup_type"] == "emerging_leader_ignition"
     assert bool(entry_view.iloc[-1]["entry_signal"])
 
 
@@ -1372,6 +1434,32 @@ def test_aggressive_starter_sizing_halves_initial_power_breakout_allocation():
     results = strategy.backtest(pd.DataFrame(rows), max_positions=0, initial_capital=100_000.0)
     held_on_entry_day = results["daily_holdings"][
         results["daily_holdings"]["Date"] == pd.Timestamp("2024-01-04")
+    ]
+
+    assert len(held_on_entry_day) == 1
+    assert abs(held_on_entry_day.iloc[0]["market_value"] - 25_000.0) < 1e-6
+
+
+def test_emerging_leader_ignition_uses_starter_sizing_by_default():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.5),
+        _emerging_row("2024-01-03", "AAA", 100.0),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_ignition_row("2024-01-05", "AAA", 107.5),
+    ]
+    rows[0]["high"] = 100.2
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.1
+    rows[3]["high"] = 108.4
+    rows[0]["low"] = 98.8
+    rows[1]["low"] = 99.3
+    rows[2]["low"] = 99.8
+    rows[3]["low"] = 102.0
+
+    results = strategy.backtest(pd.DataFrame(rows), max_positions=0, initial_capital=100_000.0)
+    held_on_entry_day = results["daily_holdings"][
+        results["daily_holdings"]["Date"] == pd.Timestamp("2024-01-05")
     ]
 
     assert len(held_on_entry_day) == 1

@@ -74,6 +74,11 @@ BACKTEST_MAX_POSITIONS = {
     # EMA_Crossover_Position: disabled — not yet validated
 }
 
+RALLY_STAGE_BACKTEST_CAPS = {
+    "emerging": 10,
+    "confirmed": 10,
+}
+
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 class _TeeStream:
@@ -338,6 +343,7 @@ def main():
         sys.exit(1)
 
     # Apply config overrides
+    strategy_bucket_limits = None
     if run_all:
         # Enable all known strategies for backtest (keep production-disabled ones enabled for testing)
         for strat, max_pos in BACKTEST_MAX_POSITIONS.items():
@@ -348,7 +354,11 @@ def main():
         # Isolate: zero everything, enable only the target
         for strat in list(cfg.POSITION_MAX_PER_STRATEGY.keys()):
             cfg.POSITION_MAX_PER_STRATEGY[strat] = 0
-        cfg.POSITION_MAX_PER_STRATEGY[target_strategy] = BACKTEST_MAX_POSITIONS.get(target_strategy, 5)
+        isolated_max_positions = BACKTEST_MAX_POSITIONS.get(target_strategy, 5)
+        if target_strategy == "RallyPattern_Position":
+            isolated_max_positions = sum(RALLY_STAGE_BACKTEST_CAPS.values())
+            strategy_bucket_limits = {target_strategy: dict(RALLY_STAGE_BACKTEST_CAPS)}
+        cfg.POSITION_MAX_PER_STRATEGY[target_strategy] = isolated_max_positions
         if target_strategy == "GapReversal_Position":
             direction = args.direction or "both"
             cfg.GAP_REVERSAL_DIRECTION = direction
@@ -399,6 +409,7 @@ def main():
         start_date=args.start,
         scan_frequency=args.freq,
         initial_capital=args.capital,
+        strategy_bucket_limits=strategy_bucket_limits,
     )
     try:
         trades = bt.run()

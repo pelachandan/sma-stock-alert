@@ -390,6 +390,8 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
             "RoomToSupportPct": s.get("RoomToSupportPct"),
             "SetupType": s.get("SetupType"),
             "SignalType": s.get("SignalType"),
+            "LeadershipStage": s.get("LeadershipStage"),
+            "PositionSizeMultiplier": s.get("PositionSizeMultiplier"),
             "EntryScore": s.get("EntryScore", s.get("Score", 0)),
         })
 

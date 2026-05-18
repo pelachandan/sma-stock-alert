@@ -298,9 +298,10 @@ class RallyPatternStrategy:
         "setup_priority": {
             "power_breakout": 0,
             "expansion_leader": 1,
-            "leader_reentry": 2,
-            "late_stage_leader": 3,
-            "emerging_leader_breakout": 4,
+            "emerging_leader_ignition": 2,
+            "leader_reentry": 3,
+            "late_stage_leader": 4,
+            "emerging_leader_breakout": 5,
             "breakout": 5,
             "emerging_leader_shelf": 6,
             "continuation_shelf": 7,
@@ -409,6 +410,17 @@ class RallyPatternStrategy:
         emerging_leader_breakout_max_close_vs_ema_20: float = 0.08,
         emerging_leader_breakout_min_close_vs_sma_50: float = -0.02,
         emerging_leader_breakout_min_close_pos: float = 0.72,
+        emerging_leader_ignition_score_threshold: float = 80.0,
+        emerging_leader_ignition_min_combined_rs: float = 0.08,
+        emerging_leader_ignition_min_pct_chg: float = 0.04,
+        emerging_leader_ignition_min_volume_ratio: float = 1.75,
+        emerging_leader_ignition_min_close_pos: float = 0.75,
+        emerging_leader_ignition_min_close_vs_ema_20: float = 0.08,
+        emerging_leader_ignition_max_close_vs_ema_20: float = 0.22,
+        emerging_leader_ignition_min_close_vs_sma_50: float = 0.0,
+        emerging_leader_ignition_min_donchian_pos: float = 0.88,
+        emerging_leader_ignition_max_support_gap: float = 0.20,
+        emerging_leader_ignition_max_close_to_prior_20bar_high: float = 0.12,
         emerging_leader_shelf_min_close_vs_ema_20: float = -0.01,
         emerging_leader_shelf_max_close_vs_ema_20: float = 0.06,
         emerging_leader_shelf_min_close_vs_sma_50: float = -0.02,
@@ -483,12 +495,14 @@ class RallyPatternStrategy:
         late_stage_leader_min_room_to_60bar_high: float = 0.01,
         power_breakout_min_room_to_60bar_high: float = 0.0,
         emerging_leader_breakout_min_room_to_60bar_high: float = 0.02,
+        emerging_leader_ignition_min_room_to_60bar_high: float = 0.0,
         emerging_leader_shelf_min_room_to_60bar_high: float = 0.02,
         enable_aggressive_early_failure: bool = False,
         enable_bb_micro_failure: bool = False,
         enable_medium_confirm_failure: bool = False,
         enable_aggressive_starter_sizing: bool = False,
         aggressive_starter_fraction: float = 0.5,
+        emerging_leader_ignition_starter_fraction: float = 0.5,
         aggressive_add_on_size_fraction: float = 1.0,
         max_add_ons_per_ticker: int = 1,
         add_on_profit_threshold: float = 0.08,
@@ -537,6 +551,7 @@ class RallyPatternStrategy:
         tiered_weight_continuation_shelf: float = 0.18,
         tiered_weight_continuation_pullback: float = 0.16,
         tiered_weight_leader_reentry: float = 0.18,
+        tiered_weight_emerging_leader_ignition: float = 0.18,
         tiered_weight_emerging_leader_breakout: float = 0.16,
         tiered_weight_emerging_leader_shelf: float = 0.14,
         tiered_weight_default: float = 0.20,
@@ -634,6 +649,17 @@ class RallyPatternStrategy:
         self.emerging_leader_breakout_max_close_vs_ema_20 = emerging_leader_breakout_max_close_vs_ema_20
         self.emerging_leader_breakout_min_close_vs_sma_50 = emerging_leader_breakout_min_close_vs_sma_50
         self.emerging_leader_breakout_min_close_pos = emerging_leader_breakout_min_close_pos
+        self.emerging_leader_ignition_score_threshold = emerging_leader_ignition_score_threshold
+        self.emerging_leader_ignition_min_combined_rs = emerging_leader_ignition_min_combined_rs
+        self.emerging_leader_ignition_min_pct_chg = emerging_leader_ignition_min_pct_chg
+        self.emerging_leader_ignition_min_volume_ratio = emerging_leader_ignition_min_volume_ratio
+        self.emerging_leader_ignition_min_close_pos = emerging_leader_ignition_min_close_pos
+        self.emerging_leader_ignition_min_close_vs_ema_20 = emerging_leader_ignition_min_close_vs_ema_20
+        self.emerging_leader_ignition_max_close_vs_ema_20 = emerging_leader_ignition_max_close_vs_ema_20
+        self.emerging_leader_ignition_min_close_vs_sma_50 = emerging_leader_ignition_min_close_vs_sma_50
+        self.emerging_leader_ignition_min_donchian_pos = emerging_leader_ignition_min_donchian_pos
+        self.emerging_leader_ignition_max_support_gap = emerging_leader_ignition_max_support_gap
+        self.emerging_leader_ignition_max_close_to_prior_20bar_high = emerging_leader_ignition_max_close_to_prior_20bar_high
         self.emerging_leader_shelf_min_close_vs_ema_20 = emerging_leader_shelf_min_close_vs_ema_20
         self.emerging_leader_shelf_max_close_vs_ema_20 = emerging_leader_shelf_max_close_vs_ema_20
         self.emerging_leader_shelf_min_close_vs_sma_50 = emerging_leader_shelf_min_close_vs_sma_50
@@ -708,12 +734,14 @@ class RallyPatternStrategy:
         self.late_stage_leader_min_room_to_60bar_high = late_stage_leader_min_room_to_60bar_high
         self.power_breakout_min_room_to_60bar_high = power_breakout_min_room_to_60bar_high
         self.emerging_leader_breakout_min_room_to_60bar_high = emerging_leader_breakout_min_room_to_60bar_high
+        self.emerging_leader_ignition_min_room_to_60bar_high = emerging_leader_ignition_min_room_to_60bar_high
         self.emerging_leader_shelf_min_room_to_60bar_high = emerging_leader_shelf_min_room_to_60bar_high
         self.enable_aggressive_early_failure = enable_aggressive_early_failure
         self.enable_bb_micro_failure = enable_bb_micro_failure
         self.enable_medium_confirm_failure = enable_medium_confirm_failure
         self.enable_aggressive_starter_sizing = enable_aggressive_starter_sizing
         self.aggressive_starter_fraction = aggressive_starter_fraction
+        self.emerging_leader_ignition_starter_fraction = emerging_leader_ignition_starter_fraction
         self.aggressive_add_on_size_fraction = aggressive_add_on_size_fraction
         self.max_add_ons_per_ticker = max_add_ons_per_ticker
         self.add_on_profit_threshold = add_on_profit_threshold
@@ -762,6 +790,7 @@ class RallyPatternStrategy:
         self.tiered_weight_continuation_shelf = tiered_weight_continuation_shelf
         self.tiered_weight_continuation_pullback = tiered_weight_continuation_pullback
         self.tiered_weight_leader_reentry = tiered_weight_leader_reentry
+        self.tiered_weight_emerging_leader_ignition = tiered_weight_emerging_leader_ignition
         self.tiered_weight_emerging_leader_breakout = tiered_weight_emerging_leader_breakout
         self.tiered_weight_emerging_leader_shelf = tiered_weight_emerging_leader_shelf
         self.tiered_weight_default = tiered_weight_default
@@ -1334,10 +1363,7 @@ class RallyPatternStrategy:
                 if position.add_on_count >= self.max_add_ons_per_ticker:
                     continue
                 current_setup_type = str(row.get("setup_type", "none"))
-                aggressive_starter_setup = (
-                    self.enable_aggressive_starter_sizing
-                    and self._is_aggressive_setup_type(position.setup_type)
-                )
+                aggressive_starter_setup = self._uses_starter_sizing(position.setup_type)
                 has_confirmation_signal = (
                     bool(row.get("zone_reentry_signal", False))
                     if aggressive_starter_setup
@@ -1489,8 +1515,9 @@ class RallyPatternStrategy:
                         if allocation <= 0:
                             break
 
-                    if self.enable_aggressive_starter_sizing and self._is_aggressive_setup_type(str(row.get("setup_type", "none"))):
-                        allocation *= self.aggressive_starter_fraction
+                    starter_multiplier = self.starter_size_multiplier(str(row.get("setup_type", "none")))
+                    if starter_multiplier < 1.0:
+                        allocation *= starter_multiplier
                         if allocation <= 0:
                             continue
 
@@ -1805,6 +1832,7 @@ class RallyPatternStrategy:
         continuation_setup_signal = continuation_shelf_setup_signal | continuation_pullback_setup_signal
         expansion_leader_setup_signal = self._expansion_leader_setup_signal(working)
         power_breakout_setup_signal = self._power_breakout_setup_signal(working)
+        emerging_leader_ignition_setup_signal = self._emerging_leader_ignition_setup_signal(working)
         emerging_leader_breakout_setup_signal = self._emerging_leader_breakout_setup_signal(working)
         emerging_leader_shelf_setup_signal = self._emerging_leader_shelf_setup_signal(working)
         leader_reentry_setup_signal = (
@@ -1831,6 +1859,7 @@ class RallyPatternStrategy:
             | leader_reentry_setup_signal
             | late_stage_leader_setup_signal
             | power_breakout_setup_signal
+            | emerging_leader_ignition_setup_signal
             | emerging_leader_breakout_setup_signal
             | emerging_leader_shelf_setup_signal
         )
@@ -1872,6 +1901,7 @@ class RallyPatternStrategy:
                 has_leader_reentry = bool(leader_reentry_setup_signal.loc[idx])
                 has_late_stage_leader = bool(late_stage_leader_setup_signal.loc[idx])
                 has_power_breakout = bool(power_breakout_setup_signal.loc[idx])
+                has_emerging_leader_ignition = bool(emerging_leader_ignition_setup_signal.loc[idx])
                 has_emerging_leader_breakout = bool(emerging_leader_breakout_setup_signal.loc[idx])
 
                 if active:
@@ -1951,6 +1981,16 @@ class RallyPatternStrategy:
                         setup_age = 0
                         setup_high = np.nan
                         current_setup_type = "power_breakout"
+                        state = "entered"
+                    elif has_emerging_leader_ignition:
+                        working.at[idx, "setup_signal"] = True
+                        working.at[idx, "entry_signal"] = True
+                        entry_triggered = True
+                        active = False
+                        active_setup_type = "none"
+                        setup_age = 0
+                        setup_high = np.nan
+                        current_setup_type = "emerging_leader_ignition"
                         state = "entered"
                     elif has_emerging_leader_breakout:
                         working.at[idx, "setup_signal"] = True
@@ -2036,6 +2076,20 @@ class RallyPatternStrategy:
                     working.at[idx, "setup_type"] = current_setup_type
                     working.at[idx, "trigger_pivot_high"] = pivot_high
                     working.at[idx, "trigger_level"] = float(row.get("prior_3bar_high", 0.0))
+                    continue
+
+                if (
+                    has_emerging_leader_ignition
+                    and not active
+                    and not entry_triggered
+                ):
+                    current_setup_type = "emerging_leader_ignition"
+                    working.at[idx, "setup_signal"] = True
+                    working.at[idx, "entry_signal"] = True
+                    working.at[idx, "setup_state"] = "entered"
+                    working.at[idx, "setup_type"] = current_setup_type
+                    working.at[idx, "trigger_pivot_high"] = pivot_high
+                    working.at[idx, "trigger_level"] = float(row.get("prior_5bar_high", 0.0))
                     continue
 
                 if (
@@ -2285,6 +2339,37 @@ class RallyPatternStrategy:
             & (scored["macd_hist"] > 0)
         )
 
+    def _emerging_leader_ignition_setup_signal(self, scored: pd.DataFrame) -> pd.Series:
+        combined_rs = scored["rs_spy_20"] + scored["rs_qqq_20"]
+        explosive_extension = (
+            (scored["close_vs_ema_20"] > self.emerging_leader_breakout_max_close_vs_ema_20)
+            | (scored["support_cluster_gap"] > self.entry_logic_config["power_breakout_max_support_cluster_gap"])
+        )
+        return (
+            scored["emerging_leader_regime_signal"].astype(bool)
+            & explosive_extension
+            & (scored["score"] >= self.emerging_leader_ignition_score_threshold)
+            & (combined_rs >= self.emerging_leader_ignition_min_combined_rs)
+            & (scored["rs_acceleration_3"] >= self.emerging_leader_min_rs_acceleration_3)
+            & (scored["close"] >= scored["prior_20bar_high"])
+            & (scored["close"] > scored["prior_5bar_high"])
+            & (scored["pct_chg"] >= self.emerging_leader_ignition_min_pct_chg)
+            & (scored["volume_ratio_20"] >= self.emerging_leader_ignition_min_volume_ratio)
+            & (scored["close_pos"] >= self.emerging_leader_ignition_min_close_pos)
+            & (scored["close_vs_ema_20"] >= self.emerging_leader_ignition_min_close_vs_ema_20)
+            & (scored["close_vs_ema_20"] <= self.emerging_leader_ignition_max_close_vs_ema_20)
+            & (scored["close_vs_sma_50"] >= self.emerging_leader_ignition_min_close_vs_sma_50)
+            & (scored["donchian_pos_20"] >= self.emerging_leader_ignition_min_donchian_pos)
+            & (scored["support_cluster_gap"] <= self.emerging_leader_ignition_max_support_gap)
+            & (scored["close_to_prior_20bar_high"] <= self.emerging_leader_ignition_max_close_to_prior_20bar_high)
+            & self._zone_entry_ok(
+                scored,
+                min_room_to_high=self.emerging_leader_ignition_min_room_to_60bar_high,
+                allow_breakout=True,
+            )
+            & (scored["macd_hist"] > 0)
+        )
+
     def _emerging_leader_shelf_setup_signal(self, scored: pd.DataFrame) -> pd.Series:
         entry_cfg = self.entry_logic_config
         return (
@@ -2452,7 +2537,13 @@ class RallyPatternStrategy:
             return float(row.get("prior_5bar_low", 0.0))
         if setup_type == "continuation_pullback":
             return float(row.get("prior_20bar_low", 0.0))
-        if setup_type in {"breakout", "power_breakout", "expansion_leader", "emerging_leader_breakout"}:
+        if setup_type in {
+            "breakout",
+            "power_breakout",
+            "expansion_leader",
+            "emerging_leader_breakout",
+            "emerging_leader_ignition",
+        }:
             return float(max(row.get("prior_20bar_high", 0.0), row.get("prior_5bar_low", 0.0)))
         if setup_type in {"leader_reentry", "late_stage_leader"}:
             return float(max(row.get("prior_5bar_low", 0.0), row.get("prior_20bar_low", 0.0)))
@@ -2852,7 +2943,7 @@ class RallyPatternStrategy:
 
         if (
             self.enable_aggressive_early_failure
-            and position.setup_type == "power_breakout"
+            and position.setup_type in {"power_breakout", "emerging_leader_ignition"}
             and position.days_held <= self.power_breakout_early_failure_max_days
         ):
             power_breakout_followthrough_failed = self._early_followthrough_failed(
@@ -2868,7 +2959,7 @@ class RallyPatternStrategy:
 
         if (
             self.enable_bb_micro_failure
-            and position.setup_type in {"power_breakout", "expansion_leader"}
+            and position.setup_type in {"power_breakout", "expansion_leader", "emerging_leader_ignition"}
             and position.days_held <= self.bb_micro_failure_max_days
             and bool(row.get("bb_micro_support_fail", False))
         ):
@@ -2876,7 +2967,7 @@ class RallyPatternStrategy:
 
         if (
             self.enable_medium_confirm_failure
-            and position.setup_type in {"power_breakout", "expansion_leader"}
+            and position.setup_type in {"power_breakout", "expansion_leader", "emerging_leader_ignition"}
             and position.days_held <= self.medium_confirm_failure_max_days
             and bool(row.get("medium_confirm_failure", False))
         ):
@@ -2920,6 +3011,7 @@ class RallyPatternStrategy:
                 "expansion_leader": self.expansion_leader_trailing_atr_multiple,
                 "leader_reentry": self.expansion_leader_trailing_atr_multiple,
                 "late_stage_leader": self.power_breakout_trailing_atr_multiple,
+                "emerging_leader_ignition": self.power_breakout_trailing_atr_multiple,
                 "emerging_leader_breakout": self.breakout_trailing_atr_multiple,
                 "emerging_leader_shelf": self.continuation_shelf_trailing_atr_multiple,
                 "power_breakout": self.power_breakout_trailing_atr_multiple,
@@ -2973,11 +3065,25 @@ class RallyPatternStrategy:
 
     @staticmethod
     def _is_aggressive_setup_type(setup_type: str) -> bool:
-        return str(setup_type) in {"power_breakout", "expansion_leader"}
+        return str(setup_type) in {"power_breakout", "expansion_leader", "emerging_leader_ignition"}
 
     @staticmethod
     def _is_emerging_setup_type(setup_type: str) -> bool:
-        return str(setup_type) in {"emerging_leader_breakout", "emerging_leader_shelf"}
+        return str(setup_type) in {"emerging_leader_breakout", "emerging_leader_shelf", "emerging_leader_ignition"}
+
+    def _uses_starter_sizing(self, setup_type: str) -> bool:
+        normalized = str(setup_type)
+        if normalized == "emerging_leader_ignition":
+            return True
+        return self.enable_aggressive_starter_sizing and self._is_aggressive_setup_type(normalized)
+
+    def starter_size_multiplier(self, setup_type: str) -> float:
+        normalized = str(setup_type)
+        if normalized == "emerging_leader_ignition":
+            return self.emerging_leader_ignition_starter_fraction
+        if self.enable_aggressive_starter_sizing and self._is_aggressive_setup_type(normalized):
+            return self.aggressive_starter_fraction
+        return 1.0
 
     @classmethod
     def _uses_medium_trigger_window(cls, setup_type: str) -> bool:
@@ -3107,6 +3213,7 @@ class RallyPatternStrategy:
             "power_breakout": self.tiered_weight_power_breakout,
             "expansion_leader": self.tiered_weight_expansion_leader,
             "late_stage_leader": self.tiered_weight_late_stage_leader,
+            "emerging_leader_ignition": self.tiered_weight_emerging_leader_ignition,
             "emerging_leader_breakout": self.tiered_weight_emerging_leader_breakout,
             "breakout": self.tiered_weight_breakout,
             "emerging_leader_shelf": self.tiered_weight_emerging_leader_shelf,

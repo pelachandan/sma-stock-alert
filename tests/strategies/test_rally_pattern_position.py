@@ -86,10 +86,59 @@ def test_rally_pattern_run_packages_ranked_candidate(monkeypatch):
     assert signal["Ticker"] == "AAA"
     assert signal["Strategy"] == "RallyPattern_Position"
     assert signal["SetupType"] == "power_breakout"
+    assert signal["LeadershipStage"] == "confirmed"
+    assert signal["PositionSizeMultiplier"] == 1.0
     assert signal["Entry"] == 100.0
     assert signal["StopLoss"] == 95.0
     assert signal["Target"] == 110.0
     assert signal["ZoneSupport"] == 94.0
+
+
+def test_rally_pattern_packages_ignition_with_starter_size(monkeypatch):
+    config = _test_rally_config()
+    monkeypatch.setattr(RallyPatternPosition, "_load_required_config", classmethod(lambda cls: config))
+    strategy = RallyPatternPosition()
+    raw_df = pd.DataFrame(
+        {
+            "Date": [pd.Timestamp("2024-03-05")],
+            "ticker": ["AAA"],
+            "open": [104.0],
+            "high": [108.0],
+            "low": [103.0],
+            "close": [107.0],
+            "volume": [2_400_000],
+        }
+    )
+    candidates = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2024-03-05"),
+                "ticker": "AAA",
+                "close": 107.0,
+                "score": 91.0,
+                "setup_type": "emerging_leader_ignition",
+                "leadership_stage": "emerging",
+                "entry_structural_support": 101.0,
+                "entry_risk_per_share": 6.0,
+                "volume": 2_400_000,
+                "prior_20bar_high": 101.0,
+                "prior_5bar_low": 100.0,
+                "setup_priority": 2,
+                "volume_ratio_20": 2.0,
+            }
+        ]
+    )
+
+    monkeypatch.setattr(strategy, "_load_history_frame", lambda tickers, as_of_date: raw_df)
+    monkeypatch.setattr(strategy, "_latest_candidate_rows", lambda loaded, scan_date: candidates)
+
+    signals = strategy.run(["AAA"], pd.Timestamp("2024-03-05"))
+
+    assert len(signals) == 1
+    signal = signals[0]
+    assert signal["SetupType"] == "emerging_leader_ignition"
+    assert signal["LeadershipStage"] == "emerging"
+    assert signal["PositionSizeMultiplier"] == 0.5
 
 
 def test_rally_pattern_latest_candidates_skip_stale_scan(monkeypatch):
