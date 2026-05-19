@@ -15,6 +15,8 @@ STRATEGIES:
 
 import pandas as pd
 import numpy as np
+import os
+import traceback
 from datetime import datetime
 from src.data.market import get_historical_data
 from src.data.indicators import compute_rsi, compute_bollinger_bands, compute_percent_b
@@ -381,6 +383,17 @@ _LEGACY_STRATEGY_NAMES = frozenset({
 })
 
 
+def _backtest_debug_enabled() -> bool:
+    return os.getenv("STOCK_ALERT_BACKTEST_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _report_registry_strategy_exception(context: str, name: str, exc: Exception) -> None:
+    if not _backtest_debug_enabled():
+        return
+    print(f"❌ [registry-strategy] {context} failed for {name}: {exc}")
+    traceback.print_exc()
+
+
 def _get_active_registry_strategies():
     """Return list of (name, strategy_instance) for all registry strategies NOT in legacy set."""
     from src.config.settings import POSITION_MAX_PER_STRATEGY
@@ -391,7 +404,8 @@ def _get_active_registry_strategies():
         if POSITION_MAX_PER_STRATEGY.get(name, 0) > 0:
             try:
                 result.append((name, StrategyRegistry.create(name)))
-            except Exception:
+            except Exception as exc:
+                _report_registry_strategy_exception("create", name, exc)
                 pass
     return result
 
@@ -1444,7 +1458,8 @@ def run_scan_as_of(as_of_date, tickers, rs_bought_tracker=None):
             strategy_signals = strategy.run(tickers, as_of_date=as_of_date)
             if strategy_signals:
                 signals.extend(strategy_signals)
-        except Exception:
+        except Exception as exc:
+            _report_registry_strategy_exception("run", getattr(strategy, "name", type(strategy).__name__), exc)
             continue
 
     # =========================================================================

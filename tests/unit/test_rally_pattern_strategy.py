@@ -49,6 +49,13 @@ def _strong_row(date: str, ticker: str, close: float = 100.0) -> dict:
         "rs_spy_50": 0.02,
         "rs_qqq_20": 0.05,
         "rs_qqq_50": 0.02,
+        "lr_slope_log_63": 0.0035,
+        "lr_slope_log_126": 0.0020,
+        "lr_r2_63": 0.82,
+        "lr_r2_126": 0.74,
+        "ema_50_slope_20": 0.0018,
+        "pct_above_ema_50_63": 0.90,
+        "max_drawdown_63": -0.08,
     }
 
 
@@ -80,6 +87,74 @@ def _moderate_entry_row(date: str, ticker: str, close: float = 100.0) -> dict:
             "atr_pct_14": 0.045,
         }
     )
+    return row
+
+
+def _emerging_row(date: str, ticker: str, close: float = 100.0) -> dict:
+    row = _strong_row(date, ticker, close)
+    row.update(
+        {
+            "close_vs_sma_50": -0.01,
+            "close_vs_ema_50": -0.005,
+            "close_vs_ema_20": 0.015,
+            "pct_from_20d_high": -0.015,
+            "donchian_pos_20": 0.78,
+            "bb_pct_b_20": 0.72,
+            "rsi_14": 60.0,
+            "rsi_21": 54.0,
+            "smoothed_rsi_ema21_rsi10": 56.0,
+            "pct_chg": 0.009,
+            "close_pos": 0.78,
+            "volume_ratio_20": 1.08,
+            "volume_ratio_50": 1.00,
+            "volume_zscore_20": 0.55,
+            "cmf_20": 0.04,
+            "rs_spy_20": 0.02,
+            "rs_spy_50": 0.0,
+            "rs_qqq_20": 0.03,
+            "rs_qqq_50": 0.0,
+            "lr_slope_log_63": 0.0006,
+            "lr_slope_log_126": 0.0001,
+            "lr_r2_63": 0.28,
+            "lr_r2_126": 0.18,
+            "ema_50_slope_20": 0.0001,
+            "pct_above_ema_50_63": 0.45,
+            "max_drawdown_63": -0.16,
+            "tight_range_5": 0.045,
+            "close_tightness_3": 0.012,
+            "atr_pct_14": 0.032,
+            "realized_vol_20": 0.17,
+        }
+    )
+    return row
+
+
+def _emerging_ignition_row(date: str, ticker: str, close: float = 100.0) -> dict:
+    row = _emerging_row(date, ticker, close)
+    row.update(
+        {
+            "close_vs_sma_50": 0.12,
+            "close_vs_ema_20": 0.16,
+            "pct_from_20d_high": 0.0,
+            "donchian_pos_20": 0.94,
+            "bb_pct_b_20": 0.98,
+            "pct_chg": 0.065,
+            "close_pos": 0.92,
+            "volume_ratio_20": 2.10,
+            "volume_ratio_50": 1.40,
+            "volume_zscore_20": 2.40,
+            "rs_spy_20": 0.10,
+            "rs_qqq_20": 0.11,
+            "lr_r2_63": 0.38,
+            "base_width_20": 0.18,
+            "base_tightness_20": 0.70,
+            "close_to_prior_20bar_high": 0.055,
+            "support_cluster_gap": 0.16,
+        }
+    )
+    row["open"] = close - 4.5
+    row["high"] = close + 1.0
+    row["low"] = close - 5.0
     return row
 
 
@@ -252,6 +327,13 @@ def _exit_row(date: str, ticker: str, close: float = 95.0) -> dict:
             "rs_spy_50": -0.02,
             "rs_qqq_20": -0.05,
             "rs_qqq_50": -0.02,
+            "lr_slope_log_63": -0.0025,
+            "lr_slope_log_126": -0.0015,
+            "lr_r2_63": 0.20,
+            "lr_r2_126": 0.18,
+            "ema_50_slope_20": -0.0012,
+            "pct_above_ema_50_63": 0.15,
+            "max_drawdown_63": -0.28,
         }
     )
     return row
@@ -346,6 +428,9 @@ def test_build_feature_dataframe_computes_required_technicals_from_raw_prices():
     assert "price_to_qqq" in features.columns
     assert "rs_spy_20" in features.columns
     assert "rs_qqq_50" in features.columns
+    assert "lr_slope_log_63" in features.columns
+    assert "lr_r2_126" in features.columns
+    assert "leader_regime_signal" in features.columns
 
 
 def test_score_dataframe_auto_builds_features_from_raw_prices():
@@ -364,7 +449,230 @@ def test_score_dataframe_auto_builds_features_from_raw_prices():
     assert "close_vs_sma_20" in scored.columns
     assert "macd_hist" in scored.columns
     assert "rs_spy_20" in scored.columns
+    assert "leader_trend_score" in scored.columns
+    assert "leader_regime_signal" in scored.columns
     assert aaa_scored["score"] >= 0
+
+
+def test_score_dataframe_flags_leader_regime_for_persistent_trend():
+    strategy = RallyPatternStrategy()
+    scored = strategy.score_dataframe(pd.DataFrame([_strong_row("2024-01-02", "AAA")]))
+
+    assert float(scored.loc[0, "leader_trend_score"]) >= strategy.leader_regime_min_score
+    assert bool(scored.loc[0, "leader_regime_signal"])
+
+
+def test_breakout_requires_leader_regime():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _strong_row("2024-01-02", "AAA", 100.0),
+        _strong_row("2024-01-03", "AAA", 101.0),
+        _strong_row("2024-01-04", "AAA", 103.0),
+    ]
+    rows[2].update(
+        {
+            "lr_slope_log_63": 0.0,
+            "lr_slope_log_126": 0.0,
+            "lr_r2_63": 0.10,
+            "lr_r2_126": 0.10,
+            "ema_50_slope_20": 0.0,
+            "pct_above_ema_50_63": 0.30,
+            "max_drawdown_63": -0.30,
+            "rs_spy_20": 0.01,
+            "rs_qqq_20": 0.01,
+        }
+    )
+    rows[2]["volume_ratio_20"] = 1.30
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+
+    assert not bool(scored.iloc[-1]["leader_regime_signal"])
+    assert not bool(scored.iloc[-1]["entry_signal"])
+
+
+def test_score_dataframe_flags_emerging_leader_regime_without_confirmed_regime():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.8),
+        _emerging_row("2024-01-03", "AAA", 100.2),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_row("2024-01-05", "AAA", 101.2),
+    ]
+    rows[0]["high"] = 100.4
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.0
+    rows[3]["high"] = 101.4
+    rows[0]["low"] = 98.9
+    rows[1]["low"] = 99.5
+    rows[2]["low"] = 100.0
+    rows[3]["low"] = 100.4
+    rows[0]["rs_qqq_20"] = 0.014
+    rows[1]["rs_qqq_20"] = 0.020
+    rows[2]["rs_qqq_20"] = 0.027
+    rows[3]["rs_qqq_20"] = 0.034
+    rows[0]["rs_spy_20"] = 0.009
+    rows[1]["rs_spy_20"] = 0.013
+    rows[2]["rs_spy_20"] = 0.018
+    rows[3]["rs_spy_20"] = 0.024
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+
+    assert not bool(scored.iloc[-1]["confirmed_leader_regime_signal"])
+    assert bool(scored.iloc[-1]["emerging_leader_regime_signal"])
+    assert scored.iloc[-1]["leadership_stage"] == "emerging"
+
+
+def test_generate_entries_triggers_emerging_leader_breakout():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.8),
+        _emerging_row("2024-01-03", "AAA", 100.2),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_row("2024-01-04", "AAA", 103.2),
+    ]
+    rows[0]["Date"] = pd.Timestamp("2024-01-02")
+    rows[1]["Date"] = pd.Timestamp("2024-01-03")
+    rows[2]["Date"] = pd.Timestamp("2024-01-04")
+    rows[3]["Date"] = pd.Timestamp("2024-01-05")
+    rows[0]["high"] = 100.4
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.0
+    rows[3]["high"] = 103.8
+    rows[0]["low"] = 98.9
+    rows[1]["low"] = 99.5
+    rows[2]["low"] = 100.0
+    rows[3]["low"] = 101.7
+    rows[3]["volume_ratio_20"] = 1.30
+    rows[3]["pct_chg"] = 0.018
+    rows[3]["close_pos"] = 0.84
+    rows[0]["rs_qqq_20"] = 0.014
+    rows[1]["rs_qqq_20"] = 0.020
+    rows[2]["rs_qqq_20"] = 0.027
+    rows[3]["rs_qqq_20"] = 0.037
+    rows[0]["rs_spy_20"] = 0.009
+    rows[1]["rs_spy_20"] = 0.013
+    rows[2]["rs_spy_20"] = 0.018
+    rows[3]["rs_spy_20"] = 0.024
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "leadership_stage", "setup_type", "entry_signal"]]
+
+    assert entry_view.iloc[-1]["leadership_stage"] == "emerging"
+    assert entry_view.iloc[-1]["setup_type"] == "emerging_leader_breakout"
+    assert bool(entry_view.iloc[-1]["entry_signal"])
+
+
+def test_generate_entries_triggers_emerging_leader_shelf_after_base_tightening():
+    strategy = RallyPatternStrategy(min_setup_days=1)
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.8),
+        _emerging_row("2024-01-03", "AAA", 100.3),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_row("2024-01-05", "AAA", 100.9),
+        _emerging_row("2024-01-08", "AAA", 101.0),
+        _emerging_row("2024-01-09", "AAA", 101.8),
+        _emerging_row("2024-01-10", "AAA", 102.2),
+    ]
+    rows[0]["high"] = 101.2
+    rows[1]["high"] = 101.0
+    rows[2]["high"] = 101.1
+    rows[3]["high"] = 101.15
+    rows[4]["high"] = 101.2
+    rows[5]["high"] = 102.0
+    rows[6]["high"] = 102.4
+    rows[0]["low"] = 97.0
+    rows[1]["low"] = 99.7
+    rows[2]["low"] = 100.2
+    rows[3]["low"] = 100.5
+    rows[4]["low"] = 100.7
+    rows[5]["low"] = 100.9
+    rows[6]["low"] = 101.2
+    rows[0]["rs_qqq_20"] = 0.012
+    rows[1]["rs_qqq_20"] = 0.016
+    rows[2]["rs_qqq_20"] = 0.022
+    rows[3]["rs_qqq_20"] = 0.028
+    rows[4]["rs_qqq_20"] = 0.032
+    rows[5]["rs_qqq_20"] = 0.036
+    rows[6]["rs_qqq_20"] = 0.040
+    rows[0]["rs_spy_20"] = 0.008
+    rows[1]["rs_spy_20"] = 0.010
+    rows[2]["rs_spy_20"] = 0.014
+    rows[3]["rs_spy_20"] = 0.018
+    rows[4]["rs_spy_20"] = 0.020
+    rows[5]["rs_spy_20"] = 0.024
+    rows[6]["rs_spy_20"] = 0.028
+    rows[4]["volume_ratio_20"] = 1.00
+    rows[4]["pct_chg"] = 0.003
+    rows[5]["volume_ratio_20"] = 1.02
+    rows[5]["pct_chg"] = 0.006
+    rows[6]["volume_ratio_20"] = 1.05
+    rows[6]["pct_chg"] = 0.008
+    rows[6]["close_pos"] = 0.82
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "leadership_stage", "setup_type", "entry_signal", "setup_state"]]
+
+    assert entry_view.iloc[-1]["leadership_stage"] == "emerging"
+    assert entry_view.iloc[-1]["setup_type"] == "emerging_leader_shelf"
+    assert entry_view.iloc[-1]["setup_state"] == "entered"
+    assert bool(entry_view.iloc[-1]["entry_signal"])
+
+
+def test_generate_entries_triggers_emerging_leader_ignition_for_explosive_launch():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.5),
+        _emerging_row("2024-01-03", "AAA", 100.0),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_ignition_row("2024-01-05", "AAA", 107.5),
+    ]
+    rows[0]["high"] = 100.2
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.1
+    rows[3]["high"] = 108.4
+    rows[0]["low"] = 98.8
+    rows[1]["low"] = 99.3
+    rows[2]["low"] = 99.8
+    rows[3]["low"] = 102.0
+    rows[0]["rs_qqq_20"] = 0.012
+    rows[1]["rs_qqq_20"] = 0.020
+    rows[2]["rs_qqq_20"] = 0.032
+    rows[3]["rs_qqq_20"] = 0.110
+    rows[0]["rs_spy_20"] = 0.008
+    rows[1]["rs_spy_20"] = 0.012
+    rows[2]["rs_spy_20"] = 0.020
+    rows[3]["rs_spy_20"] = 0.095
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "leadership_stage", "setup_type", "entry_signal"]]
+
+    assert entry_view.iloc[-1]["leadership_stage"] == "emerging"
+    assert entry_view.iloc[-1]["setup_type"] == "emerging_leader_ignition"
+    assert bool(entry_view.iloc[-1]["entry_signal"])
+
+
+def test_zone_reentry_signal_allows_emerging_leader_followthrough():
+    strategy = RallyPatternStrategy()
+    scored = pd.DataFrame(
+        [
+            {
+                "confirmed_leader_regime_signal": False,
+                "emerging_leader_regime_signal": True,
+                "score": strategy.add_on_min_score,
+                "trend_stack_bullish": 1,
+                "close_vs_ema_20": 0.04,
+                "close_vs_sma_50": 0.03,
+                "rs_spy_20": 0.02,
+                "rs_qqq_20": 0.01,
+                "zone_width_20": strategy.zone_max_width_20 - 0.01,
+                "close_to_prior_20bar_high": -0.01,
+            }
+        ]
+    )
+
+    signal = strategy._zone_reentry_signal(scored)
+
+    assert bool(signal.iloc[0])
 
 
 def test_generate_entries_and_exits_follow_exact_rules():
@@ -1150,6 +1458,32 @@ def test_aggressive_starter_sizing_halves_initial_power_breakout_allocation():
     results = strategy.backtest(pd.DataFrame(rows), max_positions=0, initial_capital=100_000.0)
     held_on_entry_day = results["daily_holdings"][
         results["daily_holdings"]["Date"] == pd.Timestamp("2024-01-04")
+    ]
+
+    assert len(held_on_entry_day) == 1
+    assert abs(held_on_entry_day.iloc[0]["market_value"] - 25_000.0) < 1e-6
+
+
+def test_emerging_leader_ignition_uses_starter_sizing_by_default():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _emerging_row("2024-01-02", "AAA", 99.5),
+        _emerging_row("2024-01-03", "AAA", 100.0),
+        _emerging_row("2024-01-04", "AAA", 100.7),
+        _emerging_ignition_row("2024-01-05", "AAA", 107.5),
+    ]
+    rows[0]["high"] = 100.2
+    rows[1]["high"] = 100.7
+    rows[2]["high"] = 101.1
+    rows[3]["high"] = 108.4
+    rows[0]["low"] = 98.8
+    rows[1]["low"] = 99.3
+    rows[2]["low"] = 99.8
+    rows[3]["low"] = 102.0
+
+    results = strategy.backtest(pd.DataFrame(rows), max_positions=0, initial_capital=100_000.0)
+    held_on_entry_day = results["daily_holdings"][
+        results["daily_holdings"]["Date"] == pd.Timestamp("2024-01-05")
     ]
 
     assert len(held_on_entry_day) == 1

@@ -5,6 +5,7 @@ Walk-forward backtester for 8 position strategies (60-120 day holds).
 Features: Strategy-specific exits, pyramiding, per-strategy position limits.
 """
 import logging
+from typing import Any, Callable
 import pandas as pd
 from src.scanning.scanner import run_scan_as_of
 from src.scanning.validator import pre_buy_check
@@ -94,20 +95,42 @@ class WalkForwardBacktester:
     Position trading backtester with pyramiding and per-strategy limits.
     """
 
-    def __init__(self, tickers, start_date=None, scan_frequency=None, initial_capital=100000):
+    RALLY_EMERGING_SETUP_TYPES = {
+        "emerging_leader_breakout",
+        "emerging_leader_ignition",
+        "emerging_leader_shelf",
+    }
+
+    def __init__(
+        self,
+        tickers,
+        start_date=None,
+        end_date=None,
+        scan_frequency=None,
+        initial_capital=100000,
+        strategy_bucket_limits=None,
+        scan_provider: Callable[[pd.Timestamp], list[dict[str, Any]]] | None = None,
+    ):
         """
         Args:
             tickers: List of ticker symbols
             start_date: Backtest start date (default from config)
+            end_date: Backtest end date (default today)
             scan_frequency: Scan frequency (default from config: W-MON)
             initial_capital: Starting capital for risk calculation
+            strategy_bucket_limits: Optional per-strategy bucket caps, e.g.
+                {"RallyPattern_Position": {"emerging": 10, "confirmed": 10}}
+            scan_provider: Optional callable to provide per-day signals instead of
+                calling the shared scanner directly.
         """
         self.log = logging.getLogger("backtest_gap_reversal")
         self.tickers = tickers
         self.start_date = pd.to_datetime(start_date or BACKTEST_START_DATE)
+        self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.scan_frequency = scan_frequency or BACKTEST_SCAN_FREQUENCY
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
+        self.scan_provider = scan_provider
 
         # Position tracker
         self.position_tracker = PositionTracker(mode="backtest")
@@ -119,6 +142,8 @@ class WalkForwardBacktester:
 
         # Per-strategy position counters
         self.strategy_positions = {}
+        self.strategy_bucket_limits = self._normalize_strategy_bucket_limits(strategy_bucket_limits)
+        self.strategy_bucket_positions = {}
 
         # Open positions for day-by-day simulation
         self.open_positions = []  # List of position dicts
@@ -133,6 +158,128 @@ class WalkForwardBacktester:
         # Current market regime (RiskOn/Neutral/RiskOff)
         self.current_position_regime = PositionRegime.NEUTRAL  # Default to neutral
         self.regime_params = get_regime_params(PositionRegime.NEUTRAL)
+
+    def _scan_signals_for_day(self, day: pd.Timestamp) -> list[dict[str, Any]]:
+        if self.scan_provider is not None:
+            provided = self.scan_provider(pd.Timestamp(day))
+            return list(provided) if provided is not None else []
+        return run_scan_as_of(day, self.tickers, rs_bought_tracker=self.rs_bought_tracker)
+
+    @staticmethod
+    def _normalize_bucket_name(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower().replace("_", "-")
+        aliases = {
+            "emerging": "emerging",
+            "early-stage": "emerging",
+            "early stage": "emerging",
+            "confirmed": "confirmed",
+            "established": "confirmed",
+        }
+        return aliases.get(normalized)
+
+    @classmethod
+    def _normalize_strategy_bucket_limits(cls, strategy_bucket_limits) -> dict[str, dict[str, int]]:
+        if not strategy_bucket_limits:
+            return {}
+
+        normalized: dict[str, dict[str, int]] = {}
+        for strategy, buckets in strategy_bucket_limits.items():
+            if not isinstance(buckets, dict):
+                continue
+
+            normalized_buckets: dict[str, int] = {}
+            for bucket_name, limit in buckets.items():
+                normalized_bucket = cls._normalize_bucket_name(bucket_name)
+                if normalized_bucket is None:
+                    continue
+                try:
+                    limit_value = int(limit)
+                except (TypeError, ValueError):
+                    continue
+                if limit_value > 0:
+                    normalized_buckets[normalized_bucket] = limit_value
+
+            if normalized_buckets:
+                normalized[str(strategy)] = normalized_buckets
+
+        return normalized
+
+    @classmethod
+    def _resolve_trade_bucket(cls, trade: dict[str, Any]) -> str | None:
+        explicit_bucket = cls._normalize_bucket_name(
+            trade.get("LeadershipStage", trade.get("leadership_stage"))
+        )
+        if explicit_bucket is not None:
+            return explicit_bucket
+
+        strategy = str(trade.get("Strategy", trade.get("strategy", ""))).strip()
+        if strategy != "RallyPattern_Position":
+            return None
+
+        setup_type = str(
+            trade.get(
+                "SetupType",
+                trade.get("setup_type", trade.get("SignalType", trade.get("signal_type", "none"))),
+            )
+        ).strip()
+        if not setup_type or setup_type == "none":
+            return None
+        if setup_type in cls.RALLY_EMERGING_SETUP_TYPES:
+            return "emerging"
+        return "confirmed"
+
+    def _strategy_bucket_limit(self, strategy: str, bucket: str | None) -> int | None:
+        if bucket is None:
+            return None
+        return self.strategy_bucket_limits.get(strategy, {}).get(bucket)
+
+    def _strategy_bucket_count(self, strategy: str, bucket: str | None) -> int:
+        if bucket is None:
+            return 0
+        return self.strategy_bucket_positions.get(strategy, {}).get(bucket, 0)
+
+    def _increment_position_counters(self, trade: dict[str, Any]) -> None:
+        strategy = str(trade.get("Strategy", trade.get("strategy", ""))).strip()
+        if not strategy:
+            return
+
+        self.strategy_positions[strategy] = self.strategy_positions.get(strategy, 0) + 1
+
+        bucket = self._resolve_trade_bucket(trade)
+        if bucket is None:
+            return
+
+        bucket_counts = self.strategy_bucket_positions.setdefault(strategy, {})
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+
+    def _decrement_position_counters(self, trade: dict[str, Any]) -> None:
+        strategy = str(trade.get("Strategy", trade.get("strategy", ""))).strip()
+        if not strategy:
+            return
+
+        self.strategy_positions[strategy] = max(0, self.strategy_positions.get(strategy, 0) - 1)
+
+        bucket = self._resolve_trade_bucket(trade)
+        if bucket is None:
+            return
+
+        bucket_counts = self.strategy_bucket_positions.get(strategy)
+        if not bucket_counts:
+            return
+
+        bucket_counts[bucket] = max(0, bucket_counts.get(bucket, 0) - 1)
+
+    def _bucket_skip_reason(self, trade: dict[str, Any]) -> str | None:
+        strategy = str(trade.get("Strategy", trade.get("strategy", ""))).strip()
+        bucket = self._resolve_trade_bucket(trade)
+        bucket_limit = self._strategy_bucket_limit(strategy, bucket)
+        if bucket_limit is None:
+            return None
+        if self._strategy_bucket_count(strategy, bucket) < bucket_limit:
+            return None
+        return f"{strategy}:{bucket}_cap"
 
     def _delete_backtest_tracker_files(self, tracker_file):
         """Delete backtest tracker files at start for clean slate.
@@ -237,6 +384,13 @@ class WalkForwardBacktester:
             risk_pct = LEADER_SHORT_CFG_BULL["RISK_PER_TRADE_PCT"]  # 0.5%
 
         shares = self._calculate_position_size(entry_price, stop_price, risk_pct=risk_pct)
+        position_size_multiplier = trade.get("PositionSizeMultiplier", 1.0)
+        try:
+            position_size_multiplier = float(position_size_multiplier)
+        except (TypeError, ValueError):
+            position_size_multiplier = 1.0
+        if position_size_multiplier > 0:
+            shares = max(int(shares * position_size_multiplier), 1)
         if shares == 0:
             return False
 
@@ -282,7 +436,10 @@ class WalkForwardBacktester:
             'gap_resistance': trade.get("GapResistance"),
             'zone_support': trade.get("ZoneSupport"),
             'zone_resistance': trade.get("ZoneResistance"),
+            'setup_type': trade.get("SetupType"),
             'signal_type': trade.get("SignalType"),
+            'leadership_stage': self._resolve_trade_bucket(trade),
+            'position_size_multiplier': position_size_multiplier,
         }
 
         self.open_positions.append(position)
@@ -1026,7 +1183,7 @@ class WalkForwardBacktester:
         # Ensure fresh tracker for this backtest run
         self.rs_bought_tracker.clear_all()
         
-        end_date = pd.Timestamp.today()
+        end_date = self.end_date if self.end_date is not None else pd.Timestamp.today()
         print(f"🚀 Position Trading Backtest: {self.start_date.date()} to {end_date.date()}")
         print(f"📅 Scan frequency: {self.scan_frequency}")
         print(f"💰 Initial capital: ${self.initial_capital:,}")
@@ -1038,6 +1195,8 @@ class WalkForwardBacktester:
             print(f"📊 Max positions: {POSITION_MAX_TOTAL} total, per-strategy limits (3-8)")
         else:
             print(f"📊 Max positions: {POSITION_MAX_TOTAL} total, {POSITION_MAX_PER_STRATEGY} per strategy")
+        if self.strategy_bucket_limits:
+            print(f"🧺 Strategy bucket caps: {self.strategy_bucket_limits}")
 
         all_trades = []
         scan_dates = pd.date_range(self.start_date, end_date, freq=self.scan_frequency)
@@ -1073,13 +1232,13 @@ class WalkForwardBacktester:
                 position_type = closed_trade.get("PositionType", "Full")
                 if position_type in ["Full", "Runner"]:  # Full exit or runner exit (after partial)
                     ticker = closed_trade["Ticker"]
-                    strategy = closed_trade["Strategy"]
                     if ticker in self.position_tracker.positions:
-                        self.position_tracker.remove_position(ticker)
-                        self.strategy_positions[strategy] = max(0, self.strategy_positions.get(strategy, 0) - 1)
+                        removed_position = self.position_tracker.remove_position(ticker)
+                        if removed_position is not None:
+                            self._decrement_position_counters(removed_position)
 
             # Run scanner for new entries (pass persistent tracker for backtest)
-            signals = run_scan_as_of(day, self.tickers, rs_bought_tracker=self.rs_bought_tracker)
+            signals = self._scan_signals_for_day(day)
 
             if signals:
                 # Log detailed signal information
@@ -1121,9 +1280,11 @@ class WalkForwardBacktester:
                         # Take trades respecting limits
                         entered_count = 0
                         skipped_count = 0
+                        skip_reasons = {}
                         
                         for _, trade in validated.iterrows():
-                            strategy = trade["Strategy"]
+                            trade_dict = trade.to_dict()
+                            strategy = trade_dict["Strategy"]
 
                             # Check if new entries allowed in current regime
                             if not allow_new_entries:
@@ -1134,6 +1295,12 @@ class WalkForwardBacktester:
                             if len(self.position_tracker.positions) >= POSITION_MAX_TOTAL:
                                 skipped_count += 1
                                 break
+
+                            bucket_skip_reason = self._bucket_skip_reason(trade_dict)
+                            if bucket_skip_reason is not None:
+                                skipped_count += 1
+                                skip_reasons[bucket_skip_reason] = skip_reasons.get(bucket_skip_reason, 0) + 1
+                                continue
 
                             # Check per-strategy limit
                             strategy_count = self.strategy_positions.get(strategy, 0)
@@ -1148,7 +1315,7 @@ class WalkForwardBacktester:
                                 continue
 
                             # Enter position
-                            success = self._enter_position(day, trade.to_dict())
+                            success = self._enter_position(day, trade_dict)
 
                             if success:
                                 # Show trade entry
@@ -1167,13 +1334,21 @@ class WalkForwardBacktester:
                                     entry_date=day,
                                     entry_price=trade["Entry"],
                                     strategy=trade["Strategy"],
-                                    as_of_date=day
+                                    as_of_date=day,
+                                    setup_type=trade_dict.get("SetupType"),
+                                    signal_type=trade_dict.get("SignalType"),
+                                    leadership_stage=self._resolve_trade_bucket(trade_dict),
                                 )
-                                self.strategy_positions[strategy] = strategy_count + 1
-                        
+                                self._increment_position_counters(trade_dict)
+                         
                         # Log summary for day
                         if entered_count > 0 or skipped_count > 0:
                             print(f"      Summary: Entered={entered_count}, Skipped={skipped_count}, Total Open={len(self.position_tracker.positions)}/{POSITION_MAX_TOTAL}")
+                            if skip_reasons:
+                                reason_summary = ", ".join(
+                                    f"{reason}={count}" for reason, count in sorted(skip_reasons.items())
+                                )
+                                print(f"      Skip detail: {reason_summary}")
 
         # =================================================================
         # Close any remaining open positions at end of backtest

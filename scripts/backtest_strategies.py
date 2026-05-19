@@ -8,6 +8,7 @@ Usage:
     python scripts/backtest_strategies.py                      # all active strategies
     python scripts/backtest_strategies.py --strategy gap       # GapReversal only
     python scripts/backtest_strategies.py --strategy gapcont   # GapContinuation only
+    python scripts/backtest_strategies.py --strategy rally     # RallyPattern only
     python scripts/backtest_strategies.py --strategy rs        # RS Ranker only
     python scripts/backtest_strategies.py --strategy all       # explicitly all
     python scripts/backtest_strategies.py --start 2020-01-01
@@ -17,6 +18,7 @@ Usage:
 Strategy aliases:
     gap       → GapReversal_Position
     gapcont   → GapContinuation_Position
+    rally     → RallyPattern_Position
     rs        → RelativeStrength_Ranker_Position
     high52    → High52_Position
     bigbase   → BigBase_Breakout_Position
@@ -31,6 +33,7 @@ if sys.platform == "win32":
 
 import argparse
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -42,6 +45,7 @@ if str(ROOT) not in sys.path:
 
 from src.backtesting.engine import WalkForwardBacktester
 from src.config.settings import BACKTEST_START_DATE, BACKTEST_SCAN_FREQUENCY
+from src.strategies.rally_pattern import RallyPatternPosition
 from scripts.download_history import download_ticker, was_update_session_today, mark_update_session
 import src.config.settings as cfg
 
@@ -50,6 +54,7 @@ import src.config.settings as cfg
 STRATEGY_ALIASES = {
     "gap":     "GapReversal_Position",
     "gapcont": "GapContinuation_Position",
+    "rally":   "RallyPattern_Position",
     "rs":      "RelativeStrength_Ranker_Position",
     "high52":  "High52_Position",
     "bigbase": "BigBase_Breakout_Position",
@@ -62,6 +67,7 @@ STRATEGY_ALIASES = {
 BACKTEST_MAX_POSITIONS = {
     "GapReversal_Position": 5,
     "GapContinuation_Position": 5,
+    "RallyPattern_Position": 5,
     "RelativeStrength_Ranker_Position": 10,
     # High52_Position: disabled — needs further tuning
     # TrendContinuation_Position: disabled — needs further tuning
@@ -69,8 +75,45 @@ BACKTEST_MAX_POSITIONS = {
     # EMA_Crossover_Position: disabled — not yet validated
 }
 
+RALLY_STAGE_BACKTEST_CAPS = {
+    "emerging": 10,
+    "confirmed": 10,
+}
+
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
+class _TeeStream:
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+        self.encoding = getattr(streams[0], "encoding", "utf-8") if streams else "utf-8"
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+    def isatty(self) -> bool:
+        return any(getattr(stream, "isatty", lambda: False)() for stream in self._streams)
+
+    def fileno(self) -> int:
+        return self._streams[0].fileno()
+
+
+def _enable_debug_capture(strategy_key: str) -> Path:
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    debug_log_path = log_dir / f"backtest_debug_{strategy_key}_{timestamp}.log"
+    debug_file = debug_log_path.open("w", encoding="utf-8", buffering=1)
+    sys.stdout = _TeeStream(sys.stdout, debug_file)
+    sys.stderr = _TeeStream(sys.stderr, debug_file)
+    return debug_log_path
+
+
 def _setup_logging() -> logging.Logger:
     log_dir = ROOT / "logs"
     log_dir.mkdir(exist_ok=True)
@@ -280,7 +323,12 @@ def _print_combined_summary(trades: pd.DataFrame):
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     args = _parse_args()
+    debug_log_path = _enable_debug_capture(args.strategy.lower())
+    os.environ["STOCK_ALERT_BACKTEST_DEBUG"] = "1"
+    os.environ["STOCK_ALERT_BACKTEST_DEBUG_LOG"] = str(debug_log_path)
     log = _setup_logging()
+    print(f"📝 Debug log: {debug_log_path}")
+    log.info("Debug capture enabled: %s", debug_log_path)
 
     # Resolve strategy selection
     strategy_key = args.strategy.lower()
@@ -296,6 +344,7 @@ def main():
         sys.exit(1)
 
     # Apply config overrides
+    strategy_bucket_limits = None
     if run_all:
         # Enable all known strategies for backtest (keep production-disabled ones enabled for testing)
         for strat, max_pos in BACKTEST_MAX_POSITIONS.items():
@@ -306,7 +355,11 @@ def main():
         # Isolate: zero everything, enable only the target
         for strat in list(cfg.POSITION_MAX_PER_STRATEGY.keys()):
             cfg.POSITION_MAX_PER_STRATEGY[strat] = 0
-        cfg.POSITION_MAX_PER_STRATEGY[target_strategy] = BACKTEST_MAX_POSITIONS.get(target_strategy, 5)
+        isolated_max_positions = BACKTEST_MAX_POSITIONS.get(target_strategy, 5)
+        if target_strategy == "RallyPattern_Position":
+            isolated_max_positions = sum(RALLY_STAGE_BACKTEST_CAPS.values())
+            strategy_bucket_limits = {target_strategy: dict(RALLY_STAGE_BACKTEST_CAPS)}
+        cfg.POSITION_MAX_PER_STRATEGY[target_strategy] = isolated_max_positions
         if target_strategy == "GapReversal_Position":
             direction = args.direction or "both"
             cfg.GAP_REVERSAL_DIRECTION = direction
@@ -351,12 +404,23 @@ def main():
     print(f"\n🚀 Running backtest...")
     log.info(f"Backtest start: strategy={label} start={args.start} freq={args.freq}")
     t0 = time.time()
+    backtest_end_date = pd.Timestamp.today()
+    scan_provider = None
+    if target_strategy == "RallyPattern_Position" and not run_all:
+        print("🧠 Precomputing rally signals once for isolated backtest...")
+        rally_strategy = RallyPatternPosition()
+        rally_scan_dates = pd.date_range(pd.to_datetime(args.start), backtest_end_date, freq=args.freq)
+        rally_signal_cache = rally_strategy.build_signal_cache(tickers, rally_scan_dates)
+        scan_provider = lambda day, cache=rally_signal_cache: cache.get(pd.Timestamp(day), [])
 
     bt = WalkForwardBacktester(
         tickers=tickers,
         start_date=args.start,
+        end_date=backtest_end_date,
         scan_frequency=args.freq,
         initial_capital=args.capital,
+        strategy_bucket_limits=strategy_bucket_limits,
+        scan_provider=scan_provider,
     )
     try:
         trades = bt.run()
@@ -367,6 +431,7 @@ def main():
     elapsed = time.time() - t0
     print(f"\n⏱️  Backtest completed in {elapsed:.1f}s")
     print(f"📊 Total trades: {len(trades)}")
+    print(f"📝 Debug log saved to: {debug_log_path}")
 
     if trades.empty:
         print("\n⚠️  No trades — check filters, thresholds, or data quality.")
