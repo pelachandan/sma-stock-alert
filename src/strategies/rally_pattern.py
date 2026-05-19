@@ -168,9 +168,21 @@ class RallyPatternPosition(BaseStrategy):
             f"precompute_raw_rows={len(raw_df)} raw_tickers={raw_df['ticker'].nunique()} "
             f"date_range={pd.Timestamp(raw_df['Date'].min()).date()}..{pd.Timestamp(raw_df['Date'].max()).date()}"
         )
+        raw_df = raw_df.sort_values(["ticker", "Date"]).reset_index(drop=True)
+        raw_df["history_bar_count"] = raw_df.groupby("ticker", sort=False).cumcount() + 1
         ranked = self.strategy.rank_candidates(raw_df)
         if ranked.empty:
             self._debug("precompute rank_candidates returned no entry candidates")
+            return empty_cache
+
+        if "history_bar_count" in ranked.columns:
+            ranked = ranked[ranked["history_bar_count"] >= self.min_history_bars].copy()
+        else:
+            history_counts = raw_df[["ticker", "Date", "history_bar_count"]]
+            ranked = ranked.merge(history_counts, on=["ticker", "Date"], how="left")
+            ranked = ranked[ranked["history_bar_count"].fillna(0) >= self.min_history_bars].copy()
+        if ranked.empty:
+            self._debug("precompute candidates suppressed by min_history_bars gating")
             return empty_cache
 
         candidates_by_date = {
