@@ -5,7 +5,7 @@ Walk-forward backtester for 8 position strategies (60-120 day holds).
 Features: Strategy-specific exits, pyramiding, per-strategy position limits.
 """
 import logging
-from typing import Any
+from typing import Any, Callable
 import pandas as pd
 from src.scanning.scanner import run_scan_as_of
 from src.scanning.validator import pre_buy_check
@@ -105,25 +105,32 @@ class WalkForwardBacktester:
         self,
         tickers,
         start_date=None,
+        end_date=None,
         scan_frequency=None,
         initial_capital=100000,
         strategy_bucket_limits=None,
+        scan_provider: Callable[[pd.Timestamp], list[dict[str, Any]]] | None = None,
     ):
         """
         Args:
             tickers: List of ticker symbols
             start_date: Backtest start date (default from config)
+            end_date: Backtest end date (default today)
             scan_frequency: Scan frequency (default from config: W-MON)
             initial_capital: Starting capital for risk calculation
             strategy_bucket_limits: Optional per-strategy bucket caps, e.g.
                 {"RallyPattern_Position": {"emerging": 10, "confirmed": 10}}
+            scan_provider: Optional callable to provide per-day signals instead of
+                calling the shared scanner directly.
         """
         self.log = logging.getLogger("backtest_gap_reversal")
         self.tickers = tickers
         self.start_date = pd.to_datetime(start_date or BACKTEST_START_DATE)
+        self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.scan_frequency = scan_frequency or BACKTEST_SCAN_FREQUENCY
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
+        self.scan_provider = scan_provider
 
         # Position tracker
         self.position_tracker = PositionTracker(mode="backtest")
@@ -151,6 +158,12 @@ class WalkForwardBacktester:
         # Current market regime (RiskOn/Neutral/RiskOff)
         self.current_position_regime = PositionRegime.NEUTRAL  # Default to neutral
         self.regime_params = get_regime_params(PositionRegime.NEUTRAL)
+
+    def _scan_signals_for_day(self, day: pd.Timestamp) -> list[dict[str, Any]]:
+        if self.scan_provider is not None:
+            provided = self.scan_provider(pd.Timestamp(day))
+            return list(provided) if provided is not None else []
+        return run_scan_as_of(day, self.tickers, rs_bought_tracker=self.rs_bought_tracker)
 
     @staticmethod
     def _normalize_bucket_name(value: Any) -> str | None:
@@ -1170,7 +1183,7 @@ class WalkForwardBacktester:
         # Ensure fresh tracker for this backtest run
         self.rs_bought_tracker.clear_all()
         
-        end_date = pd.Timestamp.today()
+        end_date = self.end_date if self.end_date is not None else pd.Timestamp.today()
         print(f"🚀 Position Trading Backtest: {self.start_date.date()} to {end_date.date()}")
         print(f"📅 Scan frequency: {self.scan_frequency}")
         print(f"💰 Initial capital: ${self.initial_capital:,}")
@@ -1225,7 +1238,7 @@ class WalkForwardBacktester:
                             self._decrement_position_counters(removed_position)
 
             # Run scanner for new entries (pass persistent tracker for backtest)
-            signals = run_scan_as_of(day, self.tickers, rs_bought_tracker=self.rs_bought_tracker)
+            signals = self._scan_signals_for_day(day)
 
             if signals:
                 # Log detailed signal information

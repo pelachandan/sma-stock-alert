@@ -45,6 +45,7 @@ if str(ROOT) not in sys.path:
 
 from src.backtesting.engine import WalkForwardBacktester
 from src.config.settings import BACKTEST_START_DATE, BACKTEST_SCAN_FREQUENCY
+from src.strategies.rally_pattern import RallyPatternPosition
 from scripts.download_history import download_ticker, was_update_session_today, mark_update_session
 import src.config.settings as cfg
 
@@ -403,13 +404,23 @@ def main():
     print(f"\n🚀 Running backtest...")
     log.info(f"Backtest start: strategy={label} start={args.start} freq={args.freq}")
     t0 = time.time()
+    backtest_end_date = pd.Timestamp.today()
+    scan_provider = None
+    if target_strategy == "RallyPattern_Position" and not run_all:
+        print("🧠 Precomputing rally signals once for isolated backtest...")
+        rally_strategy = RallyPatternPosition()
+        rally_scan_dates = pd.date_range(pd.to_datetime(args.start), backtest_end_date, freq=args.freq)
+        rally_signal_cache = rally_strategy.build_signal_cache(tickers, rally_scan_dates)
+        scan_provider = lambda day, cache=rally_signal_cache: cache.get(pd.Timestamp(day), [])
 
     bt = WalkForwardBacktester(
         tickers=tickers,
         start_date=args.start,
+        end_date=backtest_end_date,
         scan_frequency=args.freq,
         initial_capital=args.capital,
         strategy_bucket_limits=strategy_bucket_limits,
+        scan_provider=scan_provider,
     )
     try:
         trades = bt.run()

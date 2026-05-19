@@ -1,5 +1,7 @@
 import logging
 
+import pandas as pd
+
 from src.backtesting.engine import WalkForwardBacktester
 
 
@@ -86,3 +88,15 @@ def test_enter_position_applies_position_size_multiplier():
     assert len(backtester.open_positions) == 1
     assert backtester.open_positions[0]["initial_shares"] == 200
     assert backtester.open_positions[0]["position_size_multiplier"] == 0.5
+
+
+def test_scan_signals_for_day_uses_injected_provider():
+    backtester = WalkForwardBacktester.__new__(WalkForwardBacktester)
+    backtester.scan_provider = lambda day: [{"Ticker": "AAA", "Date": day}]
+    backtester.tickers = ["AAA"]
+    backtester.rs_bought_tracker = None
+
+    signals = backtester._scan_signals_for_day("2024-03-05")
+
+    assert signals[0]["Ticker"] == "AAA"
+    assert signals[0]["Date"] == pd.Timestamp("2024-03-05")
