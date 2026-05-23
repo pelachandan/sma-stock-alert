@@ -6,6 +6,26 @@ from datetime import datetime
 from src.config.settings import POSITION_INITIAL_EQUITY, POSITION_RISK_PER_TRADE_PCT
 
 
+def format_rally_stage(strategy, leadership_stage=None, setup_type=None):
+    """Return a user-friendly rally stage label for email tables."""
+    if strategy != "RallyPattern_Position":
+        return ""
+
+    stage = "" if leadership_stage is None or pd.isna(leadership_stage) else str(leadership_stage).strip().lower()
+    if not stage:
+        setup = "" if setup_type is None or pd.isna(setup_type) else str(setup_type).strip().lower()
+        if setup.startswith("emerging_"):
+            stage = "emerging"
+        elif setup:
+            stage = "confirmed"
+
+    if stage == "emerging":
+        return "Emerging"
+    if stage in {"confirmed", "established"}:
+        return "Established"
+    return ""
+
+
 # ============================================================
 # Helper: Create HTML table with score-based row coloring
 # ============================================================
@@ -211,16 +231,24 @@ def send_email_alert(
             if open_positions:
                 pos_data = []
                 for ticker, pos in open_positions.items():
+                    strategy = pos.get('strategy', 'Unknown')
                     pos_data.append({
                         "Ticker": ticker,
                         "Entry $": f"${pos.get('entry_price', 0):.2f}",
                         "Entry Date": str(pos.get('entry_date', 'N/A'))[:10],
-                        "Strategy": pos.get('strategy', 'Unknown'),
+                        "Strategy": strategy,
+                        "Rally Stage": format_rally_stage(
+                            strategy=strategy,
+                            leadership_stage=pos.get('leadership_stage'),
+                            setup_type=pos.get('setup_type'),
+                        ),
                         "Stop $": f"${pos.get('stop_loss', 0):.2f}" if pos.get('stop_loss', 0) > 0 else "N/A",
                         "Target $": f"${pos.get('target', 0):.2f}" if pos.get('target') and pos.get('target', 0) > 0 else "TRAIL MA100",
                     })
 
                 pos_df = pd.DataFrame(pos_data)
+                if "Rally Stage" in pos_df.columns and not pos_df["Rally Stage"].astype(str).str.len().gt(0).any():
+                    pos_df = pos_df.drop(columns=["Rally Stage"])
                 body_html += "<hr>"
                 body_html += df_to_html_table(
                     pos_df,
@@ -245,7 +273,19 @@ def send_email_alert(
                 body_html += f"<p><strong>Account Equity:</strong> ${equity:,.0f} | <strong>Risk per Trade:</strong> {risk_pct*100}% = ${equity*risk_pct:,.0f}</p>"
                 body_html += "<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse; width:100%;'>"
                 body_html += "<tr style='background-color:#e6f2ff;'>"
-                body_html += "<th>Ticker</th><th>Strategy</th><th>Action</th><th>Shares</th><th>Position $</th>"
+                include_rally_stage = any(
+                    format_rally_stage(
+                        strategy=row.get("Strategy"),
+                        leadership_stage=row.get("LeadershipStage"),
+                        setup_type=row.get("SetupType"),
+                    )
+                    for _, row in trade_df.iterrows()
+                )
+
+                body_html += "<th>Ticker</th><th>Strategy</th>"
+                if include_rally_stage:
+                    body_html += "<th>Rally Stage</th>"
+                body_html += "<th>Action</th><th>Shares</th><th>Position $</th>"
                 body_html += "<th>Entry $</th><th>Stop $</th><th>Target $</th><th>Risk/Share</th><th>Max Days</th></tr>"
 
                 for idx, row in trade_df.iterrows():
@@ -280,6 +320,10 @@ def send_email_alert(
                     body_html += f"<tr style='background-color:{row_color};'>"
                     body_html += f"<td><strong>{ticker}</strong></td>"
                     body_html += f"<td>{strategy}</td>"
+                    if include_rally_stage:
+                        body_html += (
+                            f"<td>{format_rally_stage(strategy, row.get('LeadershipStage'), row.get('SetupType'))}</td>"
+                        )
                     body_html += f"<td><strong>BUY {shares} shares at ${entry:.2f}</strong></td>"
                     body_html += f"<td><strong>{shares}</strong></td>"
                     body_html += f"<td>${position_size:,.0f}</td>"

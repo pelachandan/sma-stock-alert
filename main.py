@@ -87,6 +87,22 @@ def check_market_regime():
     return regime, params, params.get("allow_new_entries", True)
 
 
+def filter_trades_by_same_day_exits(trades_df: pd.DataFrame, exited_tickers: set[str]) -> pd.DataFrame:
+    """Block same-day re-entry for tickers that generated exit actions earlier in the run."""
+    if trades_df.empty or not exited_tickers:
+        return trades_df
+
+    mask = ~trades_df["Ticker"].isin(sorted(exited_tickers))
+    filtered_df = trades_df[mask].copy()
+    skipped = len(trades_df) - len(filtered_df)
+    if skipped > 0:
+        skipped_tickers = trades_df[~mask]["Ticker"].tolist()
+        print(f"   🚫 Skipped {skipped} trade(s) (same-day exit): {', '.join(skipped_tickers[:5])}")
+        if len(skipped_tickers) > 5:
+            print(f"      ... and {len(skipped_tickers) - 5} more")
+    return filtered_df
+
+
 if __name__ == "__main__":
     # --------------------------------------------------
     # CLI Arguments
@@ -159,6 +175,7 @@ if __name__ == "__main__":
     print(f"\n📊 Current Open Positions: {position_tracker.get_position_count()}/{POSITION_MAX_TOTAL}")
 
     action_signals = {'exits': [], 'partials': [], 'pyramids': [], 'warnings': []}
+    exited_tickers_today: set[str] = set()
 
     if args.skip_monitor:
         print("⏭️  Position monitoring skipped (morning scan — no close prices yet)")
@@ -182,6 +199,7 @@ if __name__ == "__main__":
                 print(f"🚨 EXITS ({len(action_signals['exits'])}):")
                 for exit_sig in action_signals['exits']:
                     ticker = exit_sig['ticker']
+                    exited_tickers_today.add(ticker)
                     print(f"   {ticker}: {exit_sig['type']} - {exit_sig['reason']}")
                     print(f"   → {exit_sig['action']}")
                     print()
@@ -292,6 +310,7 @@ if __name__ == "__main__":
         # Filter out positions we already hold
         if not trade_ready.empty:
             trade_ready = filter_trades_by_position(trade_ready, position_tracker, as_of_date=None)
+            trade_ready = filter_trades_by_same_day_exits(trade_ready, exited_tickers_today)
 
         # Check position limits
         if not trade_ready.empty:
@@ -383,6 +402,7 @@ if __name__ == "__main__":
                 'entry_score': trade.get('EntryScore', trade.get('Score')),
                 'setup_type': trade.get('SetupType'),
                 'signal_type': trade.get('SignalType'),
+                'leadership_stage': trade.get('LeadershipStage'),
                 'gap_fill_level': trade.get('GapFillLevel'),
                 'gap_high': trade.get('GapHigh'),
                 'zone_support': trade.get('ZoneSupport'),

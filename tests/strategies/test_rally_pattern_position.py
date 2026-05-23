@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+import tempfile
+
 import pandas as pd
 import pytest
 
@@ -40,6 +44,32 @@ def test_rally_pattern_requires_complete_strategy_config(monkeypatch):
 
     with pytest.raises(ValueError, match="strategy_config missing required keys"):
         RallyPatternPosition()
+
+
+def test_rally_pattern_prefers_gcp_config_over_local_file(monkeypatch):
+    local_config = _test_rally_config()
+    local_config["live_config"]["target_r_multiple"] = 1.0
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
+        json.dump(local_config, handle)
+        local_config_path = Path(handle.name)
+
+    gcp_config = _test_rally_config()
+    gcp_config["live_config"]["target_r_multiple"] = 3.0
+
+    def fake_download_file(gcs_path, local_path):
+        assert gcs_path == "config/rally_pattern_config.json"
+        with open(local_path, "w", encoding="utf-8") as handle:
+            json.dump(gcp_config, handle)
+        return True
+
+    monkeypatch.setattr(RallyPatternPosition, "CONFIG_PATH", local_config_path)
+    monkeypatch.setattr("src.strategies.rally_pattern.download_file", fake_download_file)
+
+    try:
+        loaded = RallyPatternPosition._load_required_config()
+        assert loaded["live_config"]["target_r_multiple"] == 3.0
+    finally:
+        local_config_path.unlink(missing_ok=True)
 
 
 def test_rally_pattern_run_packages_ranked_candidate(monkeypatch):

@@ -60,15 +60,15 @@ class RallyPatternPosition(BaseStrategy):
 
     @classmethod
     def _load_required_config(cls) -> dict[str, Any]:
-        if cls.CONFIG_PATH.exists():
-            with cls.CONFIG_PATH.open("r", encoding="utf-8") as handle:
-                return json.load(handle)
-
         with tempfile.TemporaryDirectory(prefix="rally-pattern-config-") as tmp_dir:
             local_path = Path(tmp_dir) / "rally_pattern_config.json"
             if download_file("config/rally_pattern_config.json", local_path):
                 with local_path.open("r", encoding="utf-8") as handle:
                     return json.load(handle)
+
+        if cls.CONFIG_PATH.exists():
+            with cls.CONFIG_PATH.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
 
         raise FileNotFoundError(
             "Missing required rally config file: config/rally_pattern_config.json "
