@@ -189,7 +189,7 @@ GCS_BUCKET=your-bucket-name
 
 ### Strategy Configuration
 
-Strategy parameters (entry filters, stop multipliers, targets, time limits) are stored privately in **GCS** (`config/settings.json`) and loaded at runtime. See `src/config/settings.py` for the full list of configurable parameters.
+Strategy parameters (entry filters, stop multipliers, targets, time limits) are stored privately in **GCS** (`config/settings.json`) and loaded at runtime. See `src/config/settings.py` for the full list of configurable parameters. New strategies that rely on external settings, such as `EMA_StackAlignment_Position`, require a matching config block (for example `ema_stack_alignment`) in that private settings file before you enable them.
 
 ## Documentation
 

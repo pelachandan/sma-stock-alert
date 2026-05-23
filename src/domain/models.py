@@ -16,6 +16,7 @@ class StrategyType(str, Enum):
     HIGH_52W = "High52_Position"
     BIGBASE_BREAKOUT = "BigBase_Breakout_Position"
     EMA_CROSSOVER = "EMA_Crossover_Position"
+    EMA_STACK_ALIGNMENT = "EMA_StackAlignment_Position"
     TREND_CONTINUATION = "TrendContinuation_Position"
     PERCENT_B = "%B_MeanReversion_Position"
 

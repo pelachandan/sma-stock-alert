@@ -115,6 +115,7 @@ STRATEGY_METRICS = {
 
     "Relative Strength": (0.30, 2.0, -1.0),     # Default values
     "RallyPattern_Position": (0.33, 2.0, -1.0),
+    "EMA_StackAlignment_Position": (0.45, 2.0, -1.0),
 }
 
 # NOTE: These metrics come from actual backtest 2022-2026
@@ -164,6 +165,7 @@ def normalize_score(score, strategy):
         "BB+RSI Combo": (50, 100),            # Double confirmation: Max 100 pts
         "Relative Strength": (5, 15),
         "RallyPattern_Position": (45, 100),
+        "EMA_StackAlignment_Position": (50, 100),
     }
 
     low, high = ranges.get(strategy, (0, 20))
@@ -220,6 +222,7 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
         "BigBase_Breakout_Position": 7,           # Highest - rarest, biggest moves
         "RelativeStrength_Ranker_Position": 6,    # Proven workhorse
         "RallyPattern_Position": 6,               # Daily rally-pattern leaders
+        "EMA_StackAlignment_Position": 5,         # Bullish EMA stack alignment
         "High52_Position": 5,                     # Momentum breakout
         "EMA_Crossover_Position": 4,
         "TrendContinuation_Position": 3,

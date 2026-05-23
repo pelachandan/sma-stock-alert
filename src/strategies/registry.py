@@ -97,6 +97,12 @@ def register_builtin_strategies() -> None:
         pass
 
     try:
+        from .ema_stack_alignment import EMAStackAlignment
+        StrategyRegistry.register("EMA_StackAlignment_Position", EMAStackAlignment)
+    except ImportError:
+        pass
+
+    try:
         from .gap_reversal import GapReversalPosition
         StrategyRegistry.register("GapReversal_Position", GapReversalPosition)
     except ImportError:
