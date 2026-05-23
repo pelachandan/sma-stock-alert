@@ -59,6 +59,7 @@ STRATEGY_ALIASES = {
     "high52":  "High52_Position",
     "bigbase": "BigBase_Breakout_Position",
     "ema":     "EMA_Crossover_Position",
+    "emastack":"EMA_StackAlignment_Position",
     "trend":   "TrendContinuation_Position",
 }
 
@@ -69,6 +70,7 @@ BACKTEST_MAX_POSITIONS = {
     "GapContinuation_Position": 5,
     "RallyPattern_Position": 5,
     "RelativeStrength_Ranker_Position": 10,
+    # EMA_StackAlignment_Position: disabled — needs validation
     # High52_Position: disabled — needs further tuning
     # TrendContinuation_Position: disabled — needs further tuning
     # BigBase_Breakout_Position: disabled — not yet validated

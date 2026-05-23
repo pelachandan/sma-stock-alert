@@ -579,7 +579,7 @@ class WalkForwardBacktester:
                 strategy = position['strategy']
 
                 # Check strategy-specific partial exit triggers
-                if strategy == "EMA_Crossover_Position":
+                if strategy in {"EMA_Crossover_Position", "EMA_StackAlignment_Position"}:
                     if current_r >= EMA_CROSS_POS_PARTIAL_R:
                         should_partial = True
                         partial_trigger = f"{EMA_CROSS_POS_PARTIAL_R}R"
@@ -766,7 +766,7 @@ class WalkForwardBacktester:
         rsi14 = recent_df["RSI14"].iloc[-1]
 
         # Strategy-specific exits
-        if strategy == "EMA_Crossover_Position":
+        if strategy in {"EMA_Crossover_Position", "EMA_StackAlignment_Position"}:
             if ma100 and pd.notna(ma100):
                 if current_close < ma100:
                     position['closes_below_trail'] += 1
@@ -1493,4 +1493,3 @@ class WalkForwardBacktester:
             summary["ExitReasonAnalysis"] = exit_analysis.to_dict("index")
 
         return summary
-

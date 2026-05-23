@@ -151,6 +151,9 @@ def monitor_positions(position_tracker):
             elif strategy == "RallyPattern_Position":
                 partial_r_trigger = 999  # rally strategy currently runs full-position exits
                 max_days = int(pos.get('max_days', 120))
+            elif strategy in {"EMA_Crossover_Position", "EMA_StackAlignment_Position"}:
+                partial_r_trigger = 2.0
+                max_days = int(pos.get('max_days', 120))
             else:
                 partial_r_trigger = 2.5
                 max_days = 150
@@ -312,6 +315,25 @@ def monitor_positions(position_tracker):
                         trail_triggered = True
                 except Exception:
                     pass
+            elif strategy in {"EMA_Crossover_Position", "EMA_StackAlignment_Position"}:
+                if ma100 and pd.notna(ma100):
+                    if current_close < ma100:
+                        closes_below_trail += 1
+                        if closes_below_trail >= 5:
+                            exits.append({
+                                'ticker': ticker,
+                                'type': 'MA100_TRAIL',
+                                'reason': f'5 closes below MA100 (${ma100:.2f})',
+                                'action': f'EXIT RUNNER at ${current_close:.2f}',
+                                'current_r': current_r,
+                                'days_held': days_held,
+                                'urgency': 'HIGH',
+                                'entry_price': entry_price,
+                                'current_price': current_close
+                            })
+                            trail_triggered = True
+                    else:
+                        closes_below_trail = 0
             elif strategy == "GapContinuation_Position":
                 try:
                     from src.strategies.gap_continuation import GapContinuationPosition

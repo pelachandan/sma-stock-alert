@@ -32,6 +32,7 @@ POSITION_MAX_PER_STRATEGY = {
     "High52_Position": 0,                      # DISABLED
     "BigBase_Breakout_Position": 0,           # DISABLED
     "EMA_Crossover_Position": 0,              # DISABLED
+    "EMA_StackAlignment_Position": 0,         # DISABLED
     "TrendContinuation_Position": 0,          # DISABLED
     "%B_MeanReversion_Position": 0,           # DISABLED
     "ShortWeakRS_Retrace_Position": 0,        # DISABLED
@@ -72,8 +73,9 @@ STRATEGY_PRIORITY = {
     "RallyPattern_Position": 3,
     "TrendContinuation_Position": 4,
     "EMA_Crossover_Position": 5,
-    "High52_Position": 6,
-    "%B_MeanReversion_Position": 7,
+    "EMA_StackAlignment_Position": 6,
+    "High52_Position": 7,
+    "%B_MeanReversion_Position": 8,
 }
 
 # =============================================================================
@@ -425,4 +427,3 @@ def _apply_gcs_overrides():
 
 
 _apply_gcs_overrides()
-
