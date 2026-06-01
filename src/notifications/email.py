@@ -1,9 +1,108 @@
+import json
 import os
 import smtplib
-from email.mime.text import MIMEText
-import pandas as pd
+import tempfile
 from datetime import datetime
+from email.mime.text import MIMEText
+from pathlib import Path
+
+import pandas as pd
+
 from src.config.settings import POSITION_INITIAL_EQUITY, POSITION_RISK_PER_TRADE_PCT
+from src.storage.gcs import download_file
+
+
+LOCAL_EMAIL_CONFIG_PATHS = (
+    Path("config") / "emailConfig.json",
+    Path("config") / "emailConfig",
+)
+GCS_EMAIL_CONFIG_PATHS = (
+    "config/emailConfig.json",
+    "config/emailConfig",
+)
+
+
+def _normalize_email_list(raw_value):
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, str):
+        values = raw_value.replace(";", ",").split(",")
+    elif isinstance(raw_value, list):
+        values = []
+        for item in raw_value:
+            if isinstance(item, str):
+                values.extend(item.replace(";", ",").split(","))
+    else:
+        return []
+
+    seen = set()
+    normalized = []
+    for value in values:
+        email = value.strip()
+        if not email or email in seen:
+            continue
+        seen.add(email)
+        normalized.append(email)
+    return normalized
+
+
+def _parse_email_config(data):
+    if isinstance(data, list):
+        return {"sender": None, "password": None, "recipients": _normalize_email_list(data)}
+
+    if not isinstance(data, dict):
+        raise ValueError("Email config must be a JSON object or array of recipient addresses.")
+
+    recipients = []
+    for key in ("bcc_recipients", "recipients", "email_ids", "emails"):
+        if key in data:
+            recipients = _normalize_email_list(data.get(key))
+            break
+
+    sender = str(data.get("sender") or data.get("from") or "").strip() or None
+    password = str(data.get("password") or data.get("app_password") or "").strip() or None
+    return {"sender": sender, "password": password, "recipients": recipients}
+
+
+def _read_email_config_file(config_path: Path):
+    with config_path.open("r", encoding="utf-8") as handle:
+        return _parse_email_config(json.load(handle))
+
+
+def _has_email_config_values(config):
+    return bool(config["sender"] or config["password"] or config["recipients"])
+
+
+def _load_email_config():
+    for local_path in LOCAL_EMAIL_CONFIG_PATHS:
+        if not local_path.exists():
+            continue
+        try:
+            config = _read_email_config_file(local_path)
+            print(f"⚙️  [email] Loaded email config from local {local_path}")
+            if _has_email_config_values(config):
+                return config
+            print(f"ℹ️  [email] Local email config {local_path} is empty; checking GCS fallback")
+        except Exception as exc:
+            print(f"⚠️  [email] Could not load local email config {local_path}: {exc}")
+
+    with tempfile.TemporaryDirectory(prefix="email-config-") as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        for gcs_path in GCS_EMAIL_CONFIG_PATHS:
+            try:
+                local_path = tmp_root / Path(gcs_path).name
+                if not download_file(gcs_path, local_path):
+                    continue
+                config = _read_email_config_file(local_path)
+                print(f"⚙️  [email] Loaded email config from GCS {gcs_path}")
+                if _has_email_config_values(config):
+                    return config
+                print(f"ℹ️  [email] GCS email config {gcs_path} is empty")
+            except Exception as exc:
+                print(f"⚠️  [email] Could not load GCS email config {gcs_path}: {exc}")
+
+    return {"sender": None, "password": None, "recipients": []}
 
 
 # ============================================================
@@ -342,12 +441,34 @@ def send_email_alert(
         else:
             body_html += "<h2>👀 WATCHLIST</h2><p>No watchlist stocks today.</p>"
 
-    # Email credentials
-    sender = os.getenv("EMAIL_SENDER")
-    password = os.getenv("EMAIL_PASSWORD")
-    # Support comma-separated list of recipients
-    receiver_raw = os.getenv("EMAIL_RECEIVER", "")
-    receivers = [r.strip() for r in receiver_raw.split(",") if r.strip()]
+    email_config = _load_email_config()
+
+    # Sender credentials continue to support env fallback so secrets stay out of git.
+    sender = (
+        email_config["sender"]
+        or os.getenv("EMAIL_SENDER")
+        or os.getenv("EMAIL_FROM")
+    )
+    password = (
+        email_config["password"]
+        or os.getenv("EMAIL_PASSWORD")
+        or os.getenv("SMTP_PASSWORD")
+    )
+    receivers = (
+        email_config["recipients"]
+        or _normalize_email_list(os.getenv("EMAIL_RECEIVER", ""))
+        or _normalize_email_list(os.getenv("EMAIL_RECIPIENTS", ""))
+    )
+
+    if not sender:
+        print("❌ Failed to send email: missing sender address (EMAIL_SENDER or emailConfig sender)")
+        return
+    if not password:
+        print("❌ Failed to send email: missing email password (EMAIL_PASSWORD or emailConfig password)")
+        return
+    if not receivers:
+        print("❌ Failed to send email: no recipient addresses configured in emailConfig or env")
+        return
 
     # Update subject if there are urgent actions
     subject = f"{subject_prefix} – {datetime.now().strftime('%Y-%m-%d')}"
@@ -360,9 +481,9 @@ def send_email_alert(
     msg = MIMEText(body_html, "html")
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = ", ".join(receivers)
+    msg["To"] = sender
 
-    # Send email
+    # Recipients are delivered via SMTP envelope only so they stay hidden from one another.
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender, password)

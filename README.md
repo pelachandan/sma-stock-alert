@@ -173,19 +173,32 @@ stock-alert/
 
 ## Configuration
 
-### Environment Variables (.env)
+### Environment Variables / Private Config
 
 ```bash
-# Email Configuration
-EMAIL_FROM=your-email@gmail.com
-EMAIL_RECIPIENTS=recipient1@example.com,recipient2@example.com
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_PASSWORD=your-app-password
+# Email sender credentials
+EMAIL_SENDER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password
 
 # Google Cloud Storage
 GCS_BUCKET=your-bucket-name
 ```
+
+Recipient lists can now live in a separate private config file at **`config/emailConfig.json`** (locally or in GCS). The recommended shape is:
+
+```json
+{
+  "recipients": [
+    "recipient1@example.com",
+    "recipient2@example.com"
+  ]
+}
+```
+
+Production behavior:
+- `src.notifications.email` loads `config/emailConfig.json` locally first, then falls back to GCS.
+- Emails are delivered using the SMTP recipient list only, so recipients are effectively **BCC'd** and cannot see one another.
+- Existing env var recipient fallbacks (`EMAIL_RECEIVER` / `EMAIL_RECIPIENTS`) still work if the config file is missing or empty.
 
 ### Strategy Configuration
 
