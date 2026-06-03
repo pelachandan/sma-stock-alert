@@ -240,6 +240,9 @@ if __name__ == "__main__":
                                 else None
                             ),
                             entry_price=entry_price if entry_price > 0 else None,
+                            setup_type=pos.get('setup_type') if pos else None,
+                            trigger_level=pos.get('trigger_level') if pos else None,
+                            leadership_stage=pos.get('leadership_stage') if pos else None,
                         )
 
             # Partial profits
@@ -305,7 +308,12 @@ if __name__ == "__main__":
         print("\n🔴 RISK_OFF regime — skipping new entries, exits only.")
         trade_ready = pd.DataFrame()
     elif signals:
-        trade_ready = pre_buy_check(signals, benchmark=REGIME_INDEX, as_of_date=None)
+        trade_ready = pre_buy_check(
+            signals,
+            benchmark=REGIME_INDEX,
+            as_of_date=None,
+            strategy_trackers=strategy_trackers,
+        )
 
         # Filter out positions we already hold
         if not trade_ready.empty:
@@ -402,6 +410,7 @@ if __name__ == "__main__":
                 'entry_score': trade.get('EntryScore', trade.get('Score')),
                 'setup_type': trade.get('SetupType'),
                 'signal_type': trade.get('SignalType'),
+                'trigger_level': trade.get('TriggerLevel'),
                 'gap_fill_level': trade.get('GapFillLevel'),
                 'gap_high': trade.get('GapHigh'),
                 'zone_support': trade.get('ZoneSupport'),
@@ -434,7 +443,10 @@ if __name__ == "__main__":
                     ticker=ticker,
                     entry_date=pd.Timestamp.today().strftime('%Y-%m-%d'),
                     entry_price=entry_price,
-                    strategy=strategy
+                    strategy=strategy,
+                    setup_type=trade.get('SetupType'),
+                    trigger_level=trade.get('TriggerLevel'),
+                    leadership_stage=trade.get('LeadershipStage'),
                 )
             else:
                 print(f"⚠️  {ticker} - already recorded or error")

@@ -133,7 +133,14 @@ class StrategyStateTracker:
         except Exception as e:
             print(f"⚠️  Error saving {self.strategy_name} tracker: {e}")
 
-    def add_bought(self, ticker: str, entry_date: str, entry_price: float, strategy: str | None = None) -> None:
+    def add_bought(
+        self,
+        ticker: str,
+        entry_date: str,
+        entry_price: float,
+        strategy: str | None = None,
+        **kwargs,
+    ) -> None:
         """
         Record a ticker as recommended for buy.
         Handles both new entries and re-entries after cooldown.
@@ -154,7 +161,8 @@ class StrategyStateTracker:
             "exit_date": None,
             "exit_price": None,
             "exit_reason": None,
-            "profit_loss": None
+            "profit_loss": None,
+            **kwargs,
         }
         self._save()
 
@@ -191,6 +199,7 @@ class StrategyStateTracker:
         strategy: str | None = None,
         entry_date: str | None = None,
         entry_price: float | None = None,
+        **kwargs,
     ) -> None:
         """
         Record position closure and move to history.
@@ -237,7 +246,8 @@ class StrategyStateTracker:
                 "exit_date": exit_date,
                 "exit_price": exit_price,
                 "exit_reason": exit_reason,
-                "profit_loss": profit_loss
+                "profit_loss": profit_loss,
+                **kwargs,
             })
             self._save()
         else:
@@ -251,6 +261,7 @@ class StrategyStateTracker:
                 "exit_price": exit_price,
                 "exit_reason": exit_reason,
                 "profit_loss": profit_loss,
+                **kwargs,
             }
             self._save()
 
