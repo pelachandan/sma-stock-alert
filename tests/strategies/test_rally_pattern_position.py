@@ -70,6 +70,7 @@ def test_rally_pattern_run_packages_ranked_candidate(monkeypatch):
                 "volume": 1_500_000,
                 "prior_20bar_high": 94.0,
                 "prior_5bar_low": 93.0,
+                "trigger_level": 94.0,
                 "setup_priority": 0,
                 "volume_ratio_20": 1.8,
             }
@@ -92,6 +93,7 @@ def test_rally_pattern_run_packages_ranked_candidate(monkeypatch):
     assert signal["StopLoss"] == 95.0
     assert signal["Target"] == 110.0
     assert signal["ZoneSupport"] == 94.0
+    assert signal["TriggerLevel"] == 94.0
 
 
 def test_rally_pattern_packages_ignition_with_starter_size(monkeypatch):

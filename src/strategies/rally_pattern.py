@@ -438,6 +438,7 @@ class RallyPatternPosition(BaseStrategy):
             "LeadershipStage": leadership_stage,
             "PositionSizeMultiplier": round(position_size_multiplier, 4),
             "ZoneSupport": round(zone_support, 2),
+            "TriggerLevel": round(float(row.get("trigger_level", 0.0)), 2),
             "Volume": int(float(row.get("volume", 0.0))),
             "Date": signal_date,
             "AsOfDate": signal_date,

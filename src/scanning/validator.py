@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from src.data.market import get_historical_data
 from src.data.indicators import compute_rsi, compute_ema_incremental
+from src.scanning.rs_bought_tracker import StrategyStateTracker
 from src.config.settings import (
     ADX_THRESHOLD,
     RSI_MIN,
@@ -12,6 +13,97 @@ from src.config.settings import (
     PRICE_ABOVE_EMA20_MAX,
     RISK_REWARD_RATIO
 )
+
+RALLY_FAILURE_EXIT_REASONS = {
+    "EXPANSION_FAILED_FOLLOWTHROUGH",
+    "ZONE_SUPPORT_FAIL",
+    "POWER_BREAKOUT_FAILED_FOLLOWTHROUGH",
+    "BB_MICRO_SUPPORT_FAIL",
+    "MEDIUM_CONFIRM_FAILURE",
+}
+RALLY_INVALIDATION_SETUP_TYPES = {
+    "breakout",
+    "power_breakout",
+    "expansion_leader",
+    "emerging_leader_breakout",
+    "emerging_leader_ignition",
+}
+RALLY_FAILURE_COOLDOWN_DAYS = 3
+RALLY_RETRY_TOLERANCE_PCT = 0.01
+RALLY_FRESH_BREAKOUT_BUFFER_PCT = 0.02
+
+
+def _rally_failed_setup_invalidated(
+    signal: dict,
+    tracker: StrategyStateTracker,
+    *,
+    as_of_date=None,
+) -> bool:
+    if signal.get("Strategy") != "RallyPattern_Position":
+        return False
+
+    setup_type = str(signal.get("SetupType", "none"))
+    if setup_type not in RALLY_INVALIDATION_SETUP_TYPES:
+        return False
+
+    ticker = signal.get("Ticker")
+    if not ticker:
+        return False
+
+    prior_state = tracker.get_ticker_info(str(ticker))
+    if not prior_state or prior_state.get("status") != "closed":
+        return False
+    if prior_state.get("exit_reason") not in RALLY_FAILURE_EXIT_REASONS:
+        return False
+    if tracker.can_buy_again(ticker, cooldown_days=RALLY_FAILURE_COOLDOWN_DAYS, as_of_date=as_of_date):
+        return False
+
+    current_trigger = float(signal.get("TriggerLevel", 0.0) or 0.0)
+    failed_trigger = float(prior_state.get("trigger_level", 0.0) or 0.0)
+    current_entry = float(signal.get("Entry", signal.get("Price", 0.0)) or 0.0)
+    failed_entry = float(prior_state.get("entry_price", 0.0) or 0.0)
+
+    same_trigger = False
+    if current_trigger > 0 and failed_trigger > 0:
+        trigger_gap = abs(current_trigger - failed_trigger) / max(current_trigger, failed_trigger)
+        same_trigger = trigger_gap <= RALLY_RETRY_TOLERANCE_PCT
+
+    same_entry = False
+    if current_entry > 0 and failed_entry > 0:
+        entry_gap = abs(current_entry - failed_entry) / max(current_entry, failed_entry)
+        same_entry = entry_gap <= RALLY_RETRY_TOLERANCE_PCT
+
+    fresh_breakout = False
+    if current_trigger > 0 and failed_trigger > 0:
+        fresh_breakout = fresh_breakout or current_trigger >= (
+            failed_trigger * (1.0 + RALLY_FRESH_BREAKOUT_BUFFER_PCT)
+        )
+    if current_entry > 0 and failed_entry > 0:
+        fresh_breakout = fresh_breakout or current_entry >= (
+            failed_entry * (1.0 + RALLY_FRESH_BREAKOUT_BUFFER_PCT)
+        )
+
+    return (same_trigger or same_entry) and not fresh_breakout
+
+
+def _filter_failed_rally_retries(combined_signals, *, as_of_date=None, strategy_trackers=None):
+    if not combined_signals:
+        return combined_signals
+
+    trackers = strategy_trackers or {}
+    rally_tracker = trackers.get("RallyPattern_Position")
+    if rally_tracker is None and any(s.get("Strategy") == "RallyPattern_Position" for s in combined_signals):
+        rally_tracker = StrategyStateTracker(strategy_name="RallyPattern_Position")
+
+    filtered = []
+    for signal in combined_signals:
+        if rally_tracker is not None and _rally_failed_setup_invalidated(signal, rally_tracker, as_of_date=as_of_date):
+            ticker = signal.get("Ticker", "UNKNOWN")
+            setup_type = signal.get("SetupType", "none")
+            print(f"   ❌ {ticker} [RallyPattern_Position]: filtered — failed setup invalidated ({setup_type})")
+            continue
+        filtered.append(signal)
+    return filtered
 
 # -------------------------------------------------
 # Strategy-Specific Stop Loss & Target Helpers
@@ -189,7 +281,7 @@ def normalize_score(score, strategy):
 # -------------------------------------------------
 # Pre-Buy Check with Market Regime Filter
 # -------------------------------------------------
-def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=None):
+def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=None, strategy_trackers=None):
     """
     Deduplicates signals, applies liquidity + trend filters,
     computes ATR-based stops, normalizes scores,
@@ -240,6 +332,12 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
         "BB Squeeze": 1,             # Lowest
         "Relative Strength": 1,
     }
+
+    combined_signals = _filter_failed_rally_retries(
+        combined_signals,
+        as_of_date=as_of_date,
+        strategy_trackers=strategy_trackers,
+    )
 
     best_signal = {}
     for s in combined_signals:
@@ -396,6 +494,7 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
             "LeadershipStage": s.get("LeadershipStage"),
             "PositionSizeMultiplier": s.get("PositionSizeMultiplier"),
             "EntryScore": s.get("EntryScore", s.get("Score", 0)),
+            "TriggerLevel": s.get("TriggerLevel"),
         })
 
     df_trades = pd.DataFrame(trades)
