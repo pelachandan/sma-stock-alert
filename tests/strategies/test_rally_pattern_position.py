@@ -188,7 +188,7 @@ def test_rally_pattern_build_signal_cache_reuses_latest_valid_signal_date(monkey
                 "ticker": "AAA",
                 "close": 100.0,
                 "score": 92.0,
-                "setup_type": "power_breakout",
+                "setup_type": "continuation_shelf",
                 "entry_structural_support": 95.0,
                 "entry_risk_per_share": 5.0,
                 "volume": 1_500_000,
@@ -212,6 +212,54 @@ def test_rally_pattern_build_signal_cache_reuses_latest_valid_signal_date(monkey
     assert len(cache[pd.Timestamp("2024-03-06")]) == 1
     assert cache[pd.Timestamp("2024-03-06")][0]["Date"] == pd.Timestamp("2024-03-05")
     assert cache[pd.Timestamp("2024-03-10")] == []
+
+
+def test_rally_pattern_build_signal_cache_does_not_reuse_stale_aggressive_breakout(monkeypatch):
+    config = _test_rally_config()
+    config["live_config"]["max_signal_age_days"] = 3
+    config["live_config"]["min_history_bars"] = 1
+    monkeypatch.setattr(RallyPatternPosition, "_load_required_config", classmethod(lambda cls: config))
+    strategy = RallyPatternPosition()
+    raw_df = pd.DataFrame(
+        {
+            "Date": [pd.Timestamp("2024-03-05"), pd.Timestamp("2024-03-06")],
+            "ticker": ["AAA", "AAA"],
+            "open": [99.0, 100.0],
+            "high": [101.0, 102.0],
+            "low": [98.5, 99.5],
+            "close": [100.0, 101.0],
+            "volume": [1_500_000, 1_600_000],
+        }
+    )
+    ranked = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2024-03-05"),
+                "ticker": "AAA",
+                "close": 100.0,
+                "score": 92.0,
+                "setup_type": "power_breakout",
+                "entry_structural_support": 95.0,
+                "entry_risk_per_share": 5.0,
+                "volume": 1_500_000,
+                "prior_20bar_high": 94.0,
+                "prior_5bar_low": 93.0,
+                "setup_priority": 0,
+                "volume_ratio_20": 1.8,
+            }
+        ]
+    )
+
+    monkeypatch.setattr(strategy, "_load_history_frame", lambda tickers, as_of_date: raw_df)
+    monkeypatch.setattr(strategy.strategy, "rank_candidates", lambda loaded: ranked)
+
+    cache = strategy.build_signal_cache(
+        ["AAA"],
+        [pd.Timestamp("2024-03-05"), pd.Timestamp("2024-03-06")],
+    )
+
+    assert len(cache[pd.Timestamp("2024-03-05")]) == 1
+    assert cache[pd.Timestamp("2024-03-06")] == []
 
 
 def test_rally_pattern_build_signal_cache_respects_min_history_per_signal_date(monkeypatch):

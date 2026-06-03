@@ -39,6 +39,15 @@ class RallyPatternPosition(BaseStrategy):
         if self._debug_enabled():
             print(f"🔎 [rally] {message}")
 
+    @staticmethod
+    def _allows_stale_signal_reuse(setup_type: str) -> bool:
+        normalized = str(setup_type)
+        return RallyPatternStrategy._is_continuation_setup_type(normalized) or normalized in {
+            "emerging_leader_shelf",
+            "leader_reentry",
+            "late_stage_leader",
+        }
+
     def __init__(self) -> None:
         super().__init__()
         config = self._load_required_config()
@@ -211,8 +220,17 @@ class RallyPatternPosition(BaseStrategy):
                 cache[scan_date] = []
                 continue
 
+            day_candidates = candidates_by_date[latest_signal_date]
+            if scan_date > latest_signal_date:
+                day_candidates = day_candidates[
+                    day_candidates["setup_type"].map(self._allows_stale_signal_reuse).fillna(False)
+                ].copy()
+                if day_candidates.empty:
+                    cache[scan_date] = []
+                    continue
+
             day_signals: list[dict[str, Any]] = []
-            for _, row in candidates_by_date[latest_signal_date].iterrows():
+            for _, row in day_candidates.iterrows():
                 signal = self._signal_from_row(row)
                 if signal is not None:
                     day_signals.append(signal)
@@ -363,6 +381,14 @@ class RallyPatternPosition(BaseStrategy):
             return ranked.iloc[0:0]
 
         latest = ranked[ranked["Date"] == latest_signal_date].copy()
+        if scan_date > latest_signal_date:
+            latest = latest[latest["setup_type"].map(self._allows_stale_signal_reuse).fillna(False)].copy()
+            if latest.empty:
+                self._debug(
+                    f"latest signal date {latest_signal_date.date()} only had fresh-only aggressive setups; "
+                    f"scan_date={scan_date.date()} returns no stale reuse candidates"
+                )
+                return latest
         setup_counts = latest["setup_type"].value_counts().to_dict() if "setup_type" in latest.columns else {}
         self._debug(
             f"ranked_candidates={len(ranked)} latest_date_candidates={len(latest)} "

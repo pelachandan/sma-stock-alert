@@ -1130,6 +1130,56 @@ def test_generate_entries_blocks_power_breakout_without_calm_or_explosive_profil
     assert entry_view.iloc[-1]["setup_type"] != "power_breakout"
 
 
+def test_generate_entries_blocks_power_breakout_with_weak_breakout_clearance_and_body():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _strong_row("2024-01-02", "AAA", 100.0),
+        _strong_row("2024-01-03", "AAA", 101.0),
+        _power_breakout_row("2024-01-04", "AAA", 102.1),
+    ]
+    rows[0]["high"] = 101.0
+    rows[1]["high"] = 102.0
+    rows[2]["open"] = 101.95
+    rows[2]["high"] = 102.4
+    rows[2]["low"] = 101.6
+    rows[2]["close"] = 102.1
+    rows[2]["body"] = 0.15
+    rows[2]["tr"] = 0.8
+    rows[2]["close_pos"] = 0.63
+    rows[2]["pct_chg"] = 0.012
+    rows[2]["volume_ratio_20"] = 1.90
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "setup_type", "entry_signal"]]
+
+    assert entry_view.iloc[-1]["setup_type"] != "power_breakout"
+
+
+def test_generate_entries_blocks_power_breakout_with_large_upper_wick():
+    strategy = RallyPatternStrategy()
+    rows = [
+        _strong_row("2024-01-02", "AAA", 100.0),
+        _strong_row("2024-01-03", "AAA", 101.0),
+        _power_breakout_row("2024-01-04", "AAA", 104.1),
+    ]
+    rows[0]["high"] = 101.0
+    rows[1]["high"] = 102.0
+    rows[2]["open"] = 103.3
+    rows[2]["high"] = 105.1
+    rows[2]["low"] = 100.0
+    rows[2]["close"] = 104.1
+    rows[2]["body"] = 0.8
+    rows[2]["tr"] = 5.1
+    rows[2]["close_pos"] = 0.81
+    rows[2]["pct_chg"] = 0.03
+    rows[2]["volume_ratio_20"] = 1.9
+
+    scored = strategy.score_dataframe(pd.DataFrame(rows))
+    entry_view = scored[["Date", "setup_type", "entry_signal"]]
+
+    assert entry_view.iloc[-1]["setup_type"] != "power_breakout"
+
+
 def test_generate_entries_triggers_expansion_leader_same_day():
     strategy = RallyPatternStrategy()
     rows = [
@@ -1299,6 +1349,66 @@ def test_backtest_enforces_cooldown_but_allows_score_75_override():
     assert not daily_holdings.empty
     assert not equity_curve.empty
     assert equity_curve["num_positions"].max() == 1
+
+
+def test_backtest_blocks_same_trigger_aggressive_retry_during_cooldown():
+    strategy = RallyPatternStrategy()
+    dates = pd.date_range("2024-01-02", periods=7, freq="B")
+
+    rows = [
+        _strong_row(str(dates[0].date()), "AAA", 100.0),
+        _strong_row(str(dates[1].date()), "AAA", 101.0),
+        _power_breakout_row(str(dates[2].date()), "AAA", 104.0),
+        _exit_row(str(dates[3].date()), "AAA", 96.0),
+        _strong_row(str(dates[4].date()), "AAA", 100.0),
+        _strong_row(str(dates[5].date()), "AAA", 101.0),
+        _power_breakout_row(str(dates[6].date()), "AAA", 104.0),
+    ]
+    rows[0]["high"] = 101.0
+    rows[1]["high"] = 102.0
+    rows[2]["high"] = 104.8
+    rows[3]["high"] = 97.0
+    rows[4]["high"] = 101.0
+    rows[5]["high"] = 102.0
+    rows[6]["high"] = 104.8
+
+    results = strategy.backtest(pd.DataFrame(rows), max_positions=1, initial_capital=100_000.0)
+    trades = results["trades"]
+
+    assert len(trades) == 1
+    assert trades.iloc[0]["entry_date"].normalize() == dates[2]
+    assert trades.iloc[0]["exit_date"].normalize() == dates[3]
+
+
+def test_backtest_allows_aggressive_retry_when_breakout_is_fresh_above_failed_trigger():
+    strategy = RallyPatternStrategy()
+    dates = pd.date_range("2024-01-02", periods=8, freq="B")
+
+    rows = [
+        _strong_row(str(dates[0].date()), "AAA", 100.0),
+        _strong_row(str(dates[1].date()), "AAA", 101.0),
+        _power_breakout_row(str(dates[2].date()), "AAA", 104.0),
+        _exit_row(str(dates[3].date()), "AAA", 96.0),
+        _strong_row(str(dates[4].date()), "AAA", 100.0),
+        _strong_row(str(dates[5].date()), "AAA", 104.5),
+        _power_breakout_row(str(dates[6].date()), "AAA", 107.0),
+        _exit_row(str(dates[7].date()), "AAA", 101.0),
+    ]
+    rows[0]["high"] = 101.0
+    rows[1]["high"] = 102.0
+    rows[2]["high"] = 104.8
+    rows[3]["high"] = 97.0
+    rows[4]["high"] = 101.0
+    rows[5]["high"] = 105.0
+    rows[6]["high"] = 107.8
+    rows[7]["high"] = 102.0
+
+    results = strategy.backtest(pd.DataFrame(rows), max_positions=1, initial_capital=100_000.0)
+    trades = results["trades"]
+
+    assert len(trades) == 2
+    assert trades["entry_date"].dt.normalize().tolist() == [dates[2], dates[6]]
+    assert trades["exit_date"].dt.normalize().tolist() == [dates[3], dates[7]]
 
 
 def test_backtest_trade_start_date_blocks_warmup_entries():
@@ -1755,6 +1865,44 @@ def test_zone_support_fail_exits_before_other_structure_checks():
     )
 
     assert strategy._exit_reason(row, position) == "zone_support_fail"
+
+
+def test_zone_support_fail_allows_brief_reclaim_grace_for_strong_aggressive_setup():
+    strategy = RallyPatternStrategy()
+    row = pd.Series(_power_breakout_row("2024-01-24", "AAA", 103.8))
+    row["close_below_ema20"] = False
+    row["close_below_ema20_2d"] = False
+    row["close_below_sma50"] = False
+    row["relative_weak"] = False
+    row["relative_weak_2d"] = False
+    row["soft_score_fail_2d"] = False
+    row["roll_low_10"] = 99.0
+    row["atr_14"] = 2.0
+    row["score"] = 91.0
+    row["close_pos"] = 0.72
+    row["rs_spy_20"] = 0.05
+    row["rs_qqq_20"] = 0.05
+    row["prior_20bar_low"] = 101.0
+    row["close_vs_ema_20"] = 0.015
+    row["close_vs_sma_50"] = 0.02
+
+    position = _BacktestPosition(
+        ticker="AAA",
+        entry_date=pd.Timestamp("2024-01-22"),
+        entry_price=105.0,
+        shares=10.0,
+        entry_score=95.0,
+        setup_type="power_breakout",
+        best_score=95.0,
+        highest_close=105.0,
+        has_new_high=False,
+        score_improved=False,
+        days_held=1,
+        add_on_count=0,
+        zone_support=104.0,
+    )
+
+    assert strategy._exit_reason(row, position) is None
 
 
 def test_breakout_exit_cuts_failed_followthrough_early():

@@ -40,6 +40,7 @@ class _BacktestPosition:
     days_held: int
     add_on_count: int
     zone_support: float = 0.0
+    trigger_level: float = 0.0
 
 
 class RallyPatternStrategy:
@@ -80,6 +81,8 @@ class RallyPatternStrategy:
         "close_pos": 0.0,
         "body": 0.0,
         "tr": 0.0,
+        "body_over_tr": 0.0,
+        "upper_wick_fraction": 0.0,
         "atr_14": 0.0,
         "atr_pct_14": 0.0,
         "realized_vol_20": 0.0,
@@ -101,6 +104,9 @@ class RallyPatternStrategy:
         "max_drawdown_63": 0.0,
         "base_width_20": 0.0,
         "base_tightness_20": 0.0,
+        "base_volume_dryup_ratio": 0.0,
+        "breakout_clearance_3": 0.0,
+        "breakout_clearance_5": 0.0,
         "rs_acceleration_3": 0.0,
         "confirmed_leader_score": 0.0,
         "confirmed_leader_regime_signal": 0.0,
@@ -290,9 +296,32 @@ class RallyPatternStrategy:
         "power_breakout_max_support_cluster_gap": 0.08,
         "power_breakout_strict_max_atr_pct_14": 0.08,
         "zone_entry_reclaim_buffer": 0.01,
+        "breakout_min_body_over_tr": 0.45,
+        "breakout_min_clearance_3": 0.002,
+        "breakout_max_base_volume_dryup_ratio": 1.10,
+        "breakout_max_upper_wick_fraction": 1.25,
+        "power_breakout_min_body_over_tr": 0.48,
+        "power_breakout_min_clearance_3": 0.003,
+        "power_breakout_max_base_volume_dryup_ratio": 1.15,
+        "power_breakout_max_upper_wick_fraction": 0.80,
+        "expansion_leader_min_body_over_tr": 0.50,
+        "expansion_leader_min_clearance_3": 0.003,
+        "expansion_leader_max_base_volume_dryup_ratio": 1.20,
+        "expansion_leader_max_upper_wick_fraction": 4.25,
+        "emerging_breakout_min_body_over_tr": 0.42,
+        "emerging_breakout_min_clearance_5": 0.002,
+        "emerging_breakout_max_base_volume_dryup_ratio": 1.15,
+        "emerging_breakout_max_upper_wick_fraction": 1.25,
+        "aggressive_retry_same_trigger_tolerance_pct": 0.01,
+        "aggressive_retry_fresh_breakout_buffer_pct": 0.02,
     }
     DEFAULT_EXIT_LOGIC_CONFIG: dict[str, Any] = {
         "soft_score_fail_threshold": 35.0,
+        "zone_support_reclaim_max_days": 3,
+        "zone_support_reclaim_min_score": 85.0,
+        "zone_support_reclaim_min_close_pos": 0.55,
+        "zone_support_reclaim_min_combined_rs": 0.06,
+        "zone_support_deeper_tolerance_pct": 0.01,
     }
     DEFAULT_RANKING_CONFIG: dict[str, Any] = {
         "setup_priority": {
@@ -1266,6 +1295,50 @@ class RallyPatternStrategy:
         candidates["candidate_rank"] = candidates.groupby("Date").cumcount() + 1
         return candidates
 
+    def _record_failed_aggressive_setup(
+        self,
+        row: pd.Series,
+        position: _BacktestPosition,
+        *,
+        exit_reason: str,
+        return_pct: float,
+    ) -> dict[str, float | str] | None:
+        if not self._is_aggressive_setup_type(position.setup_type):
+            return None
+        if return_pct > self.entry_logic_config["aggressive_retry_fresh_breakout_buffer_pct"]:
+            return None
+        return {
+            "setup_type": position.setup_type,
+            "trigger_level": float(position.trigger_level),
+            "failed_entry_price": float(position.entry_price),
+            "failed_exit_reason": exit_reason,
+            "failed_exit_close": float(row.get("close", 0.0)),
+        }
+
+    def _same_trigger_aggressive_retry_blocked(
+        self,
+        row: pd.Series,
+        failed_setup: dict[str, float | str] | None,
+    ) -> bool:
+        if failed_setup is None:
+            return False
+        if not self._is_aggressive_setup_type(str(row.get("setup_type", "none"))):
+            return False
+        if bool(row.get("zone_reentry_signal", False)):
+            return False
+
+        current_trigger = float(row.get("trigger_level", 0.0))
+        failed_trigger = float(failed_setup.get("trigger_level", 0.0))
+        if current_trigger <= 0 or failed_trigger <= 0:
+            return False
+
+        trigger_gap = abs(current_trigger - failed_trigger) / max(current_trigger, failed_trigger)
+        same_trigger = trigger_gap <= self.entry_logic_config["aggressive_retry_same_trigger_tolerance_pct"]
+        fresh_breakout = float(row.get("close", 0.0)) >= (
+            failed_trigger * (1.0 + self.entry_logic_config["aggressive_retry_fresh_breakout_buffer_pct"])
+        )
+        return same_trigger and not fresh_breakout
+
     def backtest(
         self,
         df: pd.DataFrame,
@@ -1296,6 +1369,7 @@ class RallyPatternStrategy:
 
         positions: dict[str, _BacktestPosition] = {}
         last_exit_date_index: dict[str, int] = {}
+        last_failed_aggressive_setup: dict[str, dict[str, float | str]] = {}
         cash = float(initial_capital)
         trades: list[dict[str, Any]] = []
         holdings_rows: list[dict[str, Any]] = []
@@ -1325,6 +1399,7 @@ class RallyPatternStrategy:
                     days_held=position.days_held + 1,
                     add_on_count=position.add_on_count,
                     zone_support=position.zone_support,
+                    trigger_level=position.trigger_level,
                 )
                 positions[ticker] = updated_position
 
@@ -1353,6 +1428,14 @@ class RallyPatternStrategy:
                         "exit_reason": exit_reason,
                     }
                 )
+                failed_setup = self._record_failed_aggressive_setup(
+                    row,
+                    updated_position,
+                    exit_reason=exit_reason,
+                    return_pct=trades[-1]["return_pct"],
+                )
+                if failed_setup is not None:
+                    last_failed_aggressive_setup[ticker] = failed_setup
                 last_exit_date_index[ticker] = date_index
                 del positions[ticker]
 
@@ -1425,6 +1508,7 @@ class RallyPatternStrategy:
                     days_held=position.days_held,
                     add_on_count=position.add_on_count + 1,
                     zone_support=max(position.zone_support, self._entry_zone_support_level(row, position.setup_type)),
+                    trigger_level=position.trigger_level,
                 )
 
             ranked_candidates = ranked_all[ranked_all["Date"] == current_date].copy()
@@ -1444,6 +1528,15 @@ class RallyPatternStrategy:
                         and (date_index - last_exit_idx) <= self.reentry_cooldown_days
                         and float(row["score"]) < 75
                         and not bool(row.get("zone_reentry_signal", False))
+                    ):
+                        continue
+                    if (
+                        last_exit_idx is not None
+                        and (date_index - last_exit_idx) <= self.reentry_cooldown_days
+                        and self._same_trigger_aggressive_retry_blocked(
+                            row,
+                            last_failed_aggressive_setup.get(ticker),
+                        )
                     ):
                         continue
 
@@ -1541,6 +1634,7 @@ class RallyPatternStrategy:
                         days_held=0,
                         add_on_count=0,
                         zone_support=self._entry_zone_support_level(row, str(row.get("setup_type", "none"))),
+                        trigger_level=float(row.get("trigger_level", 0.0)),
                     )
                     available_slots -= 1
 
@@ -1655,6 +1749,16 @@ class RallyPatternStrategy:
             working["close"].abs(),
             0.0,
         )
+        working["body_over_tr"] = self._safe_divide(working["body"], working["tr"], 0.0)
+        if {"high", "open", "close"}.issubset(working.columns):
+            upper_wick = working["high"] - working[["open", "close"]].max(axis=1)
+            working["upper_wick_fraction"] = self._safe_divide(
+                upper_wick.clip(lower=0.0),
+                working["body"].abs(),
+                0.0,
+            )
+        else:
+            working["upper_wick_fraction"] = 0.0
         close_std_3 = working.groupby("ticker", sort=False)["close"].transform(
             lambda series: series.rolling(self.close_tightness_window, min_periods=1).std(ddof=0)
         )
@@ -1669,6 +1773,16 @@ class RallyPatternStrategy:
         )
         working["close_to_prior_20bar_low"] = self._safe_divide(
             working["close"] - working["prior_20bar_low"],
+            working["close"].abs(),
+            0.0,
+        )
+        working["breakout_clearance_3"] = self._safe_divide(
+            working["close"] - working["prior_3bar_high"],
+            working["close"].abs(),
+            0.0,
+        )
+        working["breakout_clearance_5"] = self._safe_divide(
+            working["close"] - working["prior_5bar_high"],
             working["close"].abs(),
             0.0,
         )
@@ -1701,6 +1815,20 @@ class RallyPatternStrategy:
             working["base_width_20"].abs(),
             0.0,
         )
+        if "volume" in working.columns:
+            prior_volume_5 = working.groupby("ticker", sort=False)["volume"].transform(
+                lambda series: series.shift(1).rolling(5, min_periods=1).mean()
+            )
+            prior_volume_20 = working.groupby("ticker", sort=False)["volume"].transform(
+                lambda series: series.shift(1).rolling(20, min_periods=1).mean()
+            )
+            working["base_volume_dryup_ratio"] = self._safe_divide(
+                prior_volume_5,
+                prior_volume_20.abs(),
+                0.0,
+            )
+        else:
+            working["base_volume_dryup_ratio"] = 0.0
         working["rs_acceleration_3"] = working["rs_spy_20_change_3"] + working["rs_qqq_20_change_3"]
         working["confirmed_leader_score"] = self._confirmed_leader_score(working)
         working["confirmed_leader_regime_signal"] = self._confirmed_leader_regime_signal(working).astype(int)
@@ -2211,8 +2339,12 @@ class RallyPatternStrategy:
             & (scored["donchian_pos_20"] >= entry_cfg["breakout_base_min_donchian_pos"])
             & (scored["donchian_pos_20"] <= self.max_setup_donchian_pos)
             & (scored["close_pos"] >= self.breakout_min_close_pos)
+            & (scored["body_over_tr"] >= entry_cfg["breakout_min_body_over_tr"])
+            & (scored["breakout_clearance_3"] >= entry_cfg["breakout_min_clearance_3"])
             & (scored["tight_range_5"] <= self.breakout_max_tight_range_5)
             & (scored["volume_ratio_20"] >= entry_cfg["breakout_base_min_volume_ratio"])
+            & (scored["base_volume_dryup_ratio"] <= entry_cfg["breakout_max_base_volume_dryup_ratio"])
+            & (scored["upper_wick_fraction"] <= entry_cfg["breakout_max_upper_wick_fraction"])
             & self._zone_entry_ok(
                 scored,
                 min_room_to_high=self.breakout_min_room_to_60bar_high,
@@ -2331,6 +2463,10 @@ class RallyPatternStrategy:
             & (scored["close_vs_sma_50"] >= self.emerging_leader_breakout_min_close_vs_sma_50)
             & (scored["base_width_20"] <= self.emerging_leader_max_base_width_20)
             & (scored["support_cluster_gap"] <= self.entry_logic_config["power_breakout_max_support_cluster_gap"])
+            & (scored["body_over_tr"] >= self.entry_logic_config["emerging_breakout_min_body_over_tr"])
+            & (scored["breakout_clearance_5"] >= self.entry_logic_config["emerging_breakout_min_clearance_5"])
+            & (scored["base_volume_dryup_ratio"] <= self.entry_logic_config["emerging_breakout_max_base_volume_dryup_ratio"])
+            & (scored["upper_wick_fraction"] <= self.entry_logic_config["emerging_breakout_max_upper_wick_fraction"])
             & self._zone_entry_ok(
                 scored,
                 min_room_to_high=self.emerging_leader_breakout_min_room_to_60bar_high,
@@ -2362,6 +2498,10 @@ class RallyPatternStrategy:
             & (scored["donchian_pos_20"] >= self.emerging_leader_ignition_min_donchian_pos)
             & (scored["support_cluster_gap"] <= self.emerging_leader_ignition_max_support_gap)
             & (scored["close_to_prior_20bar_high"] <= self.emerging_leader_ignition_max_close_to_prior_20bar_high)
+            & (scored["body_over_tr"] >= self.entry_logic_config["emerging_breakout_min_body_over_tr"])
+            & (scored["breakout_clearance_5"] >= self.entry_logic_config["emerging_breakout_min_clearance_5"])
+            & (scored["base_volume_dryup_ratio"] <= self.entry_logic_config["emerging_breakout_max_base_volume_dryup_ratio"])
+            & (scored["upper_wick_fraction"] <= self.entry_logic_config["emerging_breakout_max_upper_wick_fraction"])
             & self._zone_entry_ok(
                 scored,
                 min_room_to_high=self.emerging_leader_ignition_min_room_to_60bar_high,
@@ -2412,6 +2552,10 @@ class RallyPatternStrategy:
             & (scored["pct_chg"] >= self.expansion_leader_min_pct_chg)
             & (scored["volume_ratio_20"] >= self.expansion_leader_min_volume_ratio)
             & (scored["close_pos"] >= self.expansion_leader_min_close_pos)
+            & (scored["body_over_tr"] >= self.entry_logic_config["expansion_leader_min_body_over_tr"])
+            & (scored["breakout_clearance_3"] >= self.entry_logic_config["expansion_leader_min_clearance_3"])
+            & (scored["base_volume_dryup_ratio"] <= self.entry_logic_config["expansion_leader_max_base_volume_dryup_ratio"])
+            & (scored["upper_wick_fraction"] <= self.entry_logic_config["expansion_leader_max_upper_wick_fraction"])
             & (scored["donchian_pos_20"] >= self.expansion_leader_min_donchian_pos)
             & (scored["atr_pct_14"] >= self.expansion_leader_min_atr_pct_14)
             & (scored["tight_range_5"] <= self.expansion_leader_max_tight_range_5)
@@ -2553,6 +2697,33 @@ class RallyPatternStrategy:
             return float(max(row.get("prior_5bar_low", 0.0), row.get("prior_20bar_low", 0.0)))
         return float(row.get("prior_20bar_low", 0.0))
 
+    def _deeper_zone_support_level(self, row: pd.Series) -> float:
+        close = float(row.get("close", 0.0))
+        ema20_price = close / (1.0 + float(row.get("close_vs_ema_20", 0.0))) if close > 0 else 0.0
+        sma50_price = close / (1.0 + float(row.get("close_vs_sma_50", 0.0))) if close > 0 else 0.0
+        return float(max(row.get("prior_20bar_low", 0.0), ema20_price, sma50_price))
+
+    def _zone_support_reclaim_ok(self, row: pd.Series, position: _BacktestPosition) -> bool:
+        if not self._is_aggressive_setup_type(position.setup_type):
+            return False
+        if position.days_held > int(self.exit_logic_config["zone_support_reclaim_max_days"]):
+            return False
+
+        combined_rs = float(row.get("rs_spy_20", 0.0)) + float(row.get("rs_qqq_20", 0.0))
+        if float(row.get("score", 0.0)) < float(self.exit_logic_config["zone_support_reclaim_min_score"]):
+            return False
+        if float(row.get("close_pos", 0.0)) < float(self.exit_logic_config["zone_support_reclaim_min_close_pos"]):
+            return False
+        if combined_rs < float(self.exit_logic_config["zone_support_reclaim_min_combined_rs"]):
+            return False
+
+        deeper_support = self._deeper_zone_support_level(row)
+        return not long_zone_broken(
+            float(row["close"]),
+            deeper_support,
+            float(self.exit_logic_config["zone_support_deeper_tolerance_pct"]),
+        )
+
     def _power_breakout_setup_signal(self, scored: pd.DataFrame) -> pd.Series:
         entry_cfg = self.entry_logic_config
         calm_breakout = (
@@ -2578,6 +2749,10 @@ class RallyPatternStrategy:
             & (scored["donchian_pos_20"] >= self.power_breakout_min_donchian_pos)
             & (scored["volume_ratio_20"] >= self.power_breakout_trigger_volume_ratio)
             & (scored["close_pos"] >= self.power_breakout_min_close_pos_strict)
+            & (scored["body_over_tr"] >= entry_cfg["power_breakout_min_body_over_tr"])
+            & (scored["breakout_clearance_3"] >= entry_cfg["power_breakout_min_clearance_3"])
+            & (scored["base_volume_dryup_ratio"] <= entry_cfg["power_breakout_max_base_volume_dryup_ratio"])
+            & (scored["upper_wick_fraction"] <= entry_cfg["power_breakout_max_upper_wick_fraction"])
             & (scored["pct_chg"] >= self.power_breakout_min_pct_chg)
             & (scored["pct_from_20d_high"] >= self.power_breakout_min_pct_from_20d_high)
             & (scored["macd_hist"] > 0)
@@ -2906,7 +3081,11 @@ class RallyPatternStrategy:
             and ((float(row["rs_spy_20"]) > 0) or (float(row["rs_qqq_20"]) > 0))
         )
         continuation_setup = self._is_continuation_setup_type(position.setup_type)
-        if long_zone_broken(float(row["close"]), position.zone_support, self.zone_exit_tolerance_pct):
+        if long_zone_broken(
+            float(row["close"]),
+            position.zone_support,
+            self.zone_exit_tolerance_pct,
+        ) and not self._zone_support_reclaim_ok(row, position):
             return "zone_support_fail"
         if float(row.get("roll_low_10", 0.0)) > 0 and float(row["close"]) <= float(row["roll_low_10"]):
             return "break_10d_low"
