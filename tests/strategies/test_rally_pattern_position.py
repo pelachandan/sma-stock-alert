@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from src.analysis.rally_pattern_strategy import RallyPatternStrategy
+import src.strategies.rally_pattern as rally_pattern_module
 from src.strategies.rally_pattern import RallyPatternPosition
 
 
@@ -262,6 +263,97 @@ def test_rally_pattern_build_signal_cache_does_not_reuse_stale_aggressive_breako
 
     assert len(cache[pd.Timestamp("2024-03-05")]) == 1
     assert cache[pd.Timestamp("2024-03-06")] == []
+
+
+def test_rally_pattern_exit_conditions_use_benchmark_context(monkeypatch):
+    config = _test_rally_config()
+    monkeypatch.setattr(RallyPatternPosition, "_load_required_config", classmethod(lambda cls: config))
+    strategy = RallyPatternPosition()
+    history = pd.DataFrame(
+        {
+            "Open": [100.0, 94.0],
+            "High": [101.0, 95.0],
+            "Low": [99.0, 93.0],
+            "Close": [100.0, 94.0],
+            "Volume": [1_000_000, 1_200_000],
+        },
+        index=[pd.Timestamp("2024-03-01"), pd.Timestamp("2024-03-04")],
+    )
+    benchmark_history = pd.DataFrame(
+        {
+            "Open": [100.0, 101.0],
+            "High": [101.0, 102.0],
+            "Low": [99.0, 100.0],
+            "Close": [100.0, 101.0],
+            "Volume": [10_000_000, 10_500_000],
+        },
+        index=[pd.Timestamp("2024-03-01"), pd.Timestamp("2024-03-04")],
+    )
+
+    monkeypatch.setattr(
+        rally_pattern_module,
+        "get_historical_data",
+        lambda ticker: benchmark_history.copy() if ticker in {"SPY", "QQQ"} else pd.DataFrame(),
+    )
+
+    def fake_score_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
+        assert set(raw_df["ticker"]) == {"AAA", "SPY", "QQQ"}
+        return pd.DataFrame(
+            [
+                {
+                    "Date": pd.Timestamp("2024-03-01"),
+                    "ticker": "AAA",
+                    "close": 100.0,
+                    "score": 98.0,
+                    "pct_from_20d_high": 0.0,
+                },
+                {
+                    "Date": pd.Timestamp("2024-03-04"),
+                    "ticker": "AAA",
+                    "close": 94.0,
+                    "score": 91.0,
+                    "pct_from_20d_high": 0.0,
+                },
+                {
+                    "Date": pd.Timestamp("2024-03-01"),
+                    "ticker": "SPY",
+                    "close": 100.0,
+                    "score": 0.0,
+                    "pct_from_20d_high": 0.0,
+                },
+                {
+                    "Date": pd.Timestamp("2024-03-04"),
+                    "ticker": "QQQ",
+                    "close": 101.0,
+                    "score": 0.0,
+                    "pct_from_20d_high": 0.0,
+                },
+            ]
+        )
+
+    monkeypatch.setattr(strategy.strategy, "score_dataframe", fake_score_dataframe)
+    monkeypatch.setattr(strategy.strategy, "_augment_exit_support_columns", lambda df: df.copy())
+    monkeypatch.setattr(
+        strategy.strategy,
+        "_exit_reason",
+        lambda row, position: None if float(row["score"]) >= 90.0 else "expansion_failed_followthrough",
+    )
+
+    exit_cond = strategy.get_exit_conditions(
+        {
+            "ticker": "AAA",
+            "entry_date": pd.Timestamp("2024-03-01"),
+            "entry_price": 100.0,
+            "entry_score": 98.0,
+            "setup_type": "expansion_leader",
+            "zone_support": 95.0,
+            "trigger_level": 101.0,
+        },
+        history,
+        pd.Timestamp("2024-03-04"),
+    )
+
+    assert exit_cond is None
 
 
 def test_rally_pattern_build_signal_cache_respects_min_history_per_signal_date(monkeypatch):

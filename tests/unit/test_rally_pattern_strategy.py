@@ -1969,6 +1969,39 @@ def test_expansion_leader_exit_cuts_failed_followthrough_early():
     assert strategy._exit_reason(row, position) == "expansion_failed_followthrough"
 
 
+def test_expansion_leader_early_failure_does_not_exit_on_score_only_when_structure_holds():
+    strategy = RallyPatternStrategy()
+    row = pd.Series(_expansion_leader_row("2024-01-24", "AAA", 111.0))
+    row["close_below_ema20"] = False
+    row["close_below_ema20_2d"] = False
+    row["close_below_sma50"] = False
+    row["relative_weak"] = False
+    row["relative_weak_2d"] = False
+    row["soft_score_fail_2d"] = False
+    row["roll_low_10"] = 100.0
+    row["atr_14"] = 3.0
+    row["score"] = 75.0
+    row["close_vs_ema_20"] = 0.10
+    row["close_pos"] = 0.70
+
+    position = _BacktestPosition(
+        ticker="AAA",
+        entry_date=pd.Timestamp("2024-01-22"),
+        entry_price=112.0,
+        shares=10.0,
+        entry_score=98.0,
+        setup_type="expansion_leader",
+        best_score=98.0,
+        highest_close=112.0,
+        has_new_high=False,
+        score_improved=False,
+        days_held=2,
+        add_on_count=0,
+    )
+
+    assert strategy._exit_reason(row, position) is None
+
+
 def test_expansion_leader_aggressive_early_failure_respects_weak_close():
     strategy = RallyPatternStrategy(enable_aggressive_early_failure=True)
     row = pd.Series(_expansion_leader_row("2024-01-24", "AAA", 112.0))

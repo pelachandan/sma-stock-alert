@@ -3230,13 +3230,14 @@ class RallyPatternStrategy:
     ) -> bool:
         if open_gain > max_open_gain:
             return False
-        if float(row["score"]) <= max_score:
+        weak_score = float(row["score"]) <= max_score
+        weak_trend_hold = float(row["close_vs_ema_20"]) <= min_close_vs_ema_20
+        weak_close = min_close_pos is not None and float(row.get("close_pos", 1.0)) <= min_close_pos
+        if weak_close:
             return True
-        if float(row["close_vs_ema_20"]) <= min_close_vs_ema_20:
+        if bool(row.get("relative_weak", False)):
             return True
-        if min_close_pos is not None and float(row.get("close_pos", 1.0)) <= min_close_pos:
-            return True
-        return bool(row.get("relative_weak", False))
+        return weak_score and weak_trend_hold
 
     @staticmethod
     def _clamp(value: float, low: float, high: float) -> float:
