@@ -266,16 +266,21 @@ class RallyPatternPosition(BaseStrategy):
         if not ticker:
             return None
 
-        raw_df = working.reset_index().rename(columns={"index": "Date"})
-        raw_df["ticker"] = ticker
+        raw_df = self._load_exit_history_frame(ticker, working, current_ts)
+        if raw_df.empty:
+            return None
+
         scored = self.strategy.score_dataframe(raw_df)
         scored = self.strategy._augment_exit_support_columns(scored)
-        current_row = scored.iloc[-1]
+        ticker_scored = scored[scored["ticker"] == ticker].copy()
+        if ticker_scored.empty:
+            return None
+        current_row = ticker_scored.iloc[-1]
 
         entry_date = pd.Timestamp(position.get("entry_date"))
-        trade_rows = scored[scored["Date"] >= entry_date]
+        trade_rows = ticker_scored[ticker_scored["Date"] >= entry_date]
         if trade_rows.empty:
-            trade_rows = scored.iloc[[-1]]
+            trade_rows = ticker_scored.iloc[[-1]]
 
         entry_score = float(position.get("entry_score", position.get("Score", current_row["score"])))
         setup_type = str(position.get("setup_type", position.get("SetupType", "none")))
@@ -299,6 +304,7 @@ class RallyPatternPosition(BaseStrategy):
             days_held=max(len(trade_rows) - 1, 0),
             add_on_count=int(position.get("add_on_count", 0)),
             zone_support=zone_support,
+            trigger_level=float(position.get("trigger_level", position.get("TriggerLevel", 0.0))),
         )
 
         exit_reason = self.strategy._exit_reason(current_row, backtest_position)
@@ -311,6 +317,8 @@ class RallyPatternPosition(BaseStrategy):
         ticker: str,
         df: pd.DataFrame,
         as_of_date: pd.Timestamp,
+        *,
+        require_min_history: bool = True,
     ) -> tuple[Optional[pd.DataFrame], str]:
         if df is None or df.empty:
             return None, "missing_or_empty"
@@ -321,7 +329,7 @@ class RallyPatternPosition(BaseStrategy):
             local = local[local.index.notna()]
 
         local = local[local.index <= as_of_date].copy()
-        if len(local) < self.min_history_bars:
+        if require_min_history and len(local) < self.min_history_bars:
             return None, "short_history"
 
         local = local.reset_index().rename(columns={"index": "Date"})
@@ -336,6 +344,48 @@ class RallyPatternPosition(BaseStrategy):
         if not required.issubset(local.columns):
             return None, "missing_required_cols"
         return local[["Date", "ticker", "open", "high", "low", "close", "volume"]], "loaded"
+
+    def _load_exit_history_frame(
+        self,
+        ticker: str,
+        history: pd.DataFrame,
+        as_of_date: pd.Timestamp,
+    ) -> pd.DataFrame:
+        frames: list[pd.DataFrame] = []
+
+        normalized_history, _ = self._normalize_history_frame(
+            ticker,
+            history,
+            as_of_date,
+            require_min_history=False,
+        )
+        if normalized_history is None:
+            fallback_history = get_historical_data(ticker)
+            normalized_history, _ = self._normalize_history_frame(
+                ticker,
+                fallback_history,
+                as_of_date,
+                require_min_history=False,
+            )
+        if normalized_history is not None:
+            frames.append(normalized_history)
+
+        for benchmark in self.strategy.BENCHMARK_TICKERS:
+            if benchmark == ticker:
+                continue
+            benchmark_history = get_historical_data(benchmark)
+            normalized_benchmark, _ = self._normalize_history_frame(
+                benchmark,
+                benchmark_history,
+                as_of_date,
+                require_min_history=False,
+            )
+            if normalized_benchmark is not None:
+                frames.append(normalized_benchmark)
+
+        if not frames:
+            return pd.DataFrame(columns=["Date", "ticker", "open", "high", "low", "close", "volume"])
+        return pd.concat(frames, ignore_index=True)
 
     def _load_history_frame(self, tickers: list[str], as_of_date: pd.Timestamp) -> pd.DataFrame:
         frames: list[pd.DataFrame] = []
