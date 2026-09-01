@@ -103,6 +103,20 @@ def filter_trades_by_same_day_exits(trades_df: pd.DataFrame, exited_tickers: set
     return filtered_df
 
 
+def is_streak_option_alert(trade: pd.Series | dict) -> bool:
+    """Identify the ranker's manual option guidance, which is never equity state."""
+    return trade.get("Strategy") == "Streak_Position"
+
+
+def split_streak_option_alerts(trades_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Separate manual option guidance from equity candidates before tracker handling."""
+    if trades_df.empty:
+        return trades_df.copy(), trades_df.copy()
+    option_alerts = trades_df[trades_df.apply(is_streak_option_alert, axis=1)].copy()
+    equity_trades = trades_df[~trades_df.apply(is_streak_option_alert, axis=1)].copy()
+    return equity_trades, option_alerts
+
+
 if __name__ == "__main__":
     # --------------------------------------------------
     # CLI Arguments
@@ -315,19 +329,22 @@ if __name__ == "__main__":
             strategy_trackers=strategy_trackers,
         )
 
-        # Filter out positions we already hold
-        if not trade_ready.empty:
-            trade_ready = filter_trades_by_position(trade_ready, position_tracker, as_of_date=None)
-            trade_ready = filter_trades_by_same_day_exits(trade_ready, exited_tickers_today)
+        # Preserve the ranker's option alert outside all equity position filters.
+        equity_trades, streak_alerts = split_streak_option_alerts(trade_ready)
 
-        # Check position limits
-        if not trade_ready.empty:
+        # Filter out equity positions we already hold
+        if not equity_trades.empty:
+            equity_trades = filter_trades_by_position(equity_trades, position_tracker, as_of_date=None)
+            equity_trades = filter_trades_by_same_day_exits(equity_trades, exited_tickers_today)
+
+        # Check equity-only position limits.
+        if not equity_trades.empty:
             current_total = position_tracker.get_position_count()
             available_slots = max(0, POSITION_MAX_TOTAL - current_total)
 
             # Further filter by per-strategy limits
             filtered_trades = []
-            for _, trade in trade_ready.iterrows():
+            for _, trade in equity_trades.iterrows():
                 strategy = trade["Strategy"]
                 current_count = strategy_counts.get(strategy, 0)
                 max_for_strategy = POSITION_MAX_PER_STRATEGY.get(strategy, 5)
@@ -336,7 +353,8 @@ if __name__ == "__main__":
                     filtered_trades.append(trade)
                     strategy_counts[strategy] = current_count + 1
 
-            trade_ready = pd.DataFrame(filtered_trades) if filtered_trades else pd.DataFrame()
+            equity_trades = pd.DataFrame(filtered_trades) if filtered_trades else pd.DataFrame()
+        trade_ready = pd.concat([equity_trades, streak_alerts], ignore_index=True)
     else:
         trade_ready = pd.DataFrame()
 
@@ -363,6 +381,13 @@ if __name__ == "__main__":
             entry = trade['Entry']
             stop = trade['StopLoss']
             target = trade['Target']
+            if is_streak_option_alert(trade):
+                print(f"   {idx+1}. {ticker:<6} | NEXT-DAY GREEN PREDICTION")
+                print(f"      🎯 Buy a 7-day ITM call at next session open; exit at that session close")
+                print(f"      Probability next green: {trade.get('ProbabilityNextGreen', 0):.1%}")
+                print(f"      Why: {trade.get('PredictionReason', 'qualified Streak signal')}")
+                print()
+                continue
 
             # Skip if entry/stop are invalid (data corruption guard)
             if not entry or not stop or entry <= 0 or stop <= 0:
@@ -404,6 +429,9 @@ if __name__ == "__main__":
             strategy = trade['Strategy']
             stop_loss = trade['StopLoss']
             target = trade['Target']
+            if is_streak_option_alert(trade):
+                print(f"✅ {ticker} prediction alert sent (not added to equity position tracker)")
+                continue
             extra_fields = {
                 'direction': trade.get('Direction', 'LONG'),
                 'max_days': trade.get('MaxDays'),

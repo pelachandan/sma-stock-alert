@@ -28,6 +28,7 @@ POSITION_MAX_PER_STRATEGY = {
     "GapContinuation_Position": 10,           # ACTIVE: bullish earnings / gap-and-go continuation
     "RelativeStrength_Ranker_Position": 10,   # ACTIVE: 48.8% WR, 2.16R, +$620k net (backtested)
     "RallyPattern_Position": 10,              # ACTIVE: daily rally-pattern leader scan
+    "Streak_Position": 1,                     # Alert-only: one liquid mega-cap tech next-day call candidate
     "ConsumerDisc_Ranker_Position": 0,        # DISABLED: unvalidated
     "High52_Position": 0,                      # DISABLED
     "BigBase_Breakout_Position": 0,           # DISABLED
@@ -71,6 +72,7 @@ STRATEGY_PRIORITY = {
     "BigBase_Breakout_Position": 1,
     "RelativeStrength_Ranker_Position": 2,
     "RallyPattern_Position": 3,
+    "Streak_Position": 4,
     "TrendContinuation_Position": 4,
     "EMA_Crossover_Position": 5,
     "EMA_StackAlignment_Position": 6,
@@ -427,3 +429,7 @@ def _apply_gcs_overrides():
 
 
 _apply_gcs_overrides()
+
+# Older external settings files predate this alert-only strategy. Preserve its
+# source default until the corresponding GCS setting is added explicitly.
+POSITION_MAX_PER_STRATEGY.setdefault("Streak_Position", 1)

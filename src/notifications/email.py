@@ -350,6 +350,19 @@ def send_email_alert(
                 for idx, row in trade_df.iterrows():
                     ticker = row['Ticker']
                     strategy = row['Strategy']
+                    if strategy == "Streak_Position":
+                        probability = row.get("ProbabilityNextGreen", 0)
+                        reason = row.get("PredictionReason", "Rolling ranker selection")
+                        body_html += "<tr style='background-color:#c6efce;'>"
+                        body_html += f"<td><strong>{ticker}</strong></td>"
+                        body_html += f"<td>{strategy}</td>"
+                        body_html += (
+                            "<td colspan='8'><strong>OPTION GUIDANCE:</strong> Buy one 7-day ITM call "
+                            "at the next session open; exit at that session close. "
+                            f"Estimated next-day green probability: {probability:.1%}.<br>{reason}</td>"
+                        )
+                        body_html += "</tr>"
+                        continue
                     entry = row['Entry']
                     stop = row['StopLoss']
                     target = row['Target']

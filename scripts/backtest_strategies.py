@@ -19,6 +19,7 @@ Strategy aliases:
     gap       → GapReversal_Position
     gapcont   → GapContinuation_Position
     rally     → RallyPattern_Position
+    streak    → Streak_Position
     rs        → RelativeStrength_Ranker_Position
     high52    → High52_Position
     bigbase   → BigBase_Breakout_Position
@@ -55,6 +56,7 @@ STRATEGY_ALIASES = {
     "gap":     "GapReversal_Position",
     "gapcont": "GapContinuation_Position",
     "rally":   "RallyPattern_Position",
+    "streak":  "Streak_Position",
     "rs":      "RelativeStrength_Ranker_Position",
     "high52":  "High52_Position",
     "bigbase": "BigBase_Breakout_Position",
@@ -69,6 +71,7 @@ BACKTEST_MAX_POSITIONS = {
     "GapReversal_Position": 5,
     "GapContinuation_Position": 5,
     "RallyPattern_Position": 5,
+    "Streak_Position": 1,
     "RelativeStrength_Ranker_Position": 10,
     # EMA_StackAlignment_Position: disabled — needs validation
     # High52_Position: disabled — needs further tuning

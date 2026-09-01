@@ -320,6 +320,7 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
         "TrendContinuation_Position": 3,
         "%B_MeanReversion_Position": 2,
         "GapReversal_Position": 8,                # Highest - rare extreme RSI + gap setup
+        "Streak_Position": 9,                     # Next-day option prediction alert
         "ShortWeakRS_Retrace_Position": 0,        # Shorts LOSE to longs in deduplication (priority 0)
 
         # Legacy Short-Term Strategies (OLD - for backward compatibility)
@@ -339,15 +340,23 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
         strategy_trackers=strategy_trackers,
     )
 
+    # The ranker deliberately produces exactly one option alert across its
+    # universe. It must not displace a normal equity setup for the same ticker.
+    prediction_signals = [
+        signal for signal in combined_signals
+        if signal.get("Strategy") == "Streak_Position"
+    ]
     best_signal = {}
     for s in combined_signals:
+        if s.get("Strategy") == "Streak_Position":
+            continue
         t = s["Ticker"]
         strategy = s["Strategy"]
         # Use .get() with default to avoid KeyError if strategy not in priority dict
         if t not in best_signal or priority.get(strategy, 0) > priority.get(best_signal[t]["Strategy"], 0):
             best_signal[t] = s
 
-    signals = list(best_signal.values())
+    signals = list(best_signal.values()) + prediction_signals
     trades = []
 
     for s in signals:
@@ -495,6 +504,20 @@ def pre_buy_check(combined_signals, rr_ratio=None, benchmark="SPY", as_of_date=N
             "PositionSizeMultiplier": s.get("PositionSizeMultiplier"),
             "EntryScore": s.get("EntryScore", s.get("Score", 0)),
             "TriggerLevel": s.get("TriggerLevel"),
+            "EntryTiming": s.get("EntryTiming"),
+            "Prediction": s.get("Prediction"),
+            "ProbabilityNextGreen": s.get("ProbabilityNextGreen"),
+            "PredictionReason": s.get("PredictionReason"),
+            "CandleDirection": s.get("CandleDirection"),
+            "StreakLength": s.get("StreakLength"),
+            "RSI14": s.get("RSI14"),
+            "PercentB": s.get("PercentB"),
+            "VolumeRatio20": s.get("VolumeRatio20"),
+            "Return5": s.get("Return5"),
+            "Return20": s.get("Return20"),
+            "EMA20": s.get("EMA20"),
+            "EMA50": s.get("EMA50"),
+            "QQQRegime": s.get("QQQRegime"),
         })
 
     df_trades = pd.DataFrame(trades)
