@@ -118,6 +118,26 @@ def monitor_positions(position_tracker):
             partial_exited = pos.get('partial_exited', False)
             pyramids_added = pos.get('pyramids_added', 0)
 
+            if strategy == "Streak_Position":
+                latest_bar_date = pd.Timestamp(df.index[-1]).normalize()
+                if latest_bar_date >= entry_date.normalize():
+                    if direction == "SHORT":
+                        streak_r = (entry_price - current_close) / max(entry_price * 0.01, 0.01)
+                    else:
+                        streak_r = (current_close - entry_price) / max(entry_price * 0.01, 0.01)
+                    exits.append({
+                        'ticker': ticker,
+                        'type': 'NEXT_SESSION_CLOSE',
+                        'reason': 'Streak strategy exits at the next trading session close',
+                        'action': f'EXIT ALL at ${current_close:.2f}',
+                        'current_r': streak_r,
+                        'days_held': days_held,
+                        'urgency': 'HIGH',
+                        'entry_price': entry_price,
+                        'current_price': current_close
+                    })
+                continue
+
             # Calculate current R-multiple (direction-aware)
             # Apply 1% floor to match position sizing logic and prevent extreme R from tiny stops
             min_risk = entry_price * 0.01 if entry_price > 0 else 0.01

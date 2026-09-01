@@ -147,6 +147,7 @@ class WalkForwardBacktester:
 
         # Open positions for day-by-day simulation
         self.open_positions = []  # List of position dicts
+        self.pending_entries = []  # Signals awaiting their next-session open entry
 
         # All completed trades
         self.completed_trades = []
@@ -453,6 +454,54 @@ class WalkForwardBacktester:
 
         return True
 
+    def _execute_pending_entries(self, current_date):
+        """Enter deferred signals at the first available daily open after their signal date."""
+        remaining_entries = []
+        for trade in self.pending_entries:
+            ticker = trade["Ticker"]
+            strategy = trade["Strategy"]
+            df = get_historical_data(ticker)
+            if df.empty or current_date not in df.index:
+                remaining_entries.append(trade)
+                continue
+
+            if len(self.position_tracker.positions) >= POSITION_MAX_TOTAL:
+                remaining_entries.append(trade)
+                continue
+            max_for_strategy = POSITION_MAX_PER_STRATEGY.get(strategy, 5)
+            if self.strategy_positions.get(strategy, 0) >= max_for_strategy:
+                remaining_entries.append(trade)
+                continue
+            if self.position_tracker.is_in_position(ticker, as_of_date=current_date):
+                continue
+
+            entry_price = float(df.loc[current_date, "Open"])
+            if entry_price <= 0:
+                continue
+            entry_trade = dict(trade)
+            entry_trade["Entry"] = entry_price
+            entry_trade["StopLoss"] = entry_price * (
+                1.99 if entry_trade.get("Direction") == "SHORT" else 0.01
+            )
+            if not self._enter_position(current_date, entry_trade):
+                continue
+            self.position_tracker.add_position(
+                ticker=ticker,
+                entry_date=current_date,
+                entry_price=entry_price,
+                strategy=strategy,
+                as_of_date=current_date,
+                setup_type=entry_trade.get("SetupType"),
+                signal_type=entry_trade.get("SignalType"),
+                leadership_stage=self._resolve_trade_bucket(entry_trade),
+            )
+            self._increment_position_counters(entry_trade)
+            print(
+                f"   ✅ {current_date.date()} | ENTER {ticker} @ ${entry_price:.2f} "
+                f"| {strategy[:20]} (next-session open)"
+            )
+        self.pending_entries = remaining_entries
+
     def _check_open_positions(self, current_date):
         """
         Check all open positions for exits on current date.
@@ -528,7 +577,7 @@ class WalkForwardBacktester:
             # Gap strategies are thesis-specific campaigns; pyramiding adds noise and
             # has historically distorted the gap trade profiles.
             if (POSITION_PYRAMID_ENABLED and
-                position['strategy'] not in {"GapReversal_Position", "GapContinuation_Position"} and
+                position['strategy'] not in {"GapReversal_Position", "GapContinuation_Position", "Streak_Position"} and
                 current_r >= POSITION_PYRAMID_R_TRIGGER and
                 len(position['pyramid_adds']) < POSITION_PYRAMID_MAX_ADDS and
                 not position['partial_exited']):
@@ -732,6 +781,13 @@ class WalkForwardBacktester:
         stop = position['stop_price']
         days_held = position['days_held']
         max_days = position['max_days']
+
+        # Streak positions are a fixed close-to-close hypothesis test. Do not
+        # allow intraday stops or generic exits to replace the next-session close.
+        if strategy == "Streak_Position" and days_held >= 1:
+            return self._close_position(
+                position, current_date, current_close, "NextSessionClose", current_r
+            )
 
         # Check stop loss first — guard against NaN in OHLC data (prevents stop from silently not firing)
         low_price = today_data.get('Low', float('nan')) if hasattr(today_data, 'get') else today_data['Low']
@@ -1213,6 +1269,10 @@ class WalkForwardBacktester:
             risk_pct = self.regime_params.get('risk_per_trade_pct', 2.0)
             adx_thresh = self.regime_params.get('adx_threshold', 25)
             max_pos = self.regime_params.get('max_positions', 10)
+
+            # Deferred signals enter at the next available trading session's open,
+            # before that session's close is evaluated for the same-day exit.
+            self._execute_pending_entries(day)
             
             # Progress indicator
             if idx % 10 == 0:
@@ -1315,6 +1375,15 @@ class WalkForwardBacktester:
                                 continue
 
                             # Enter position
+                            if trade_dict.get("EntryTiming") == "NEXT_SESSION_OPEN":
+                                self.pending_entries.append(trade_dict)
+                                entered_count += 1
+                                print(
+                                    f"   ⏳ {day.date()} | QUEUED {trade['Ticker']} "
+                                    f"| {strategy[:20]} for next-session open"
+                                )
+                                continue
+
                             success = self._enter_position(day, trade_dict)
 
                             if success:
