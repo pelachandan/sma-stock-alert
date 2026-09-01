@@ -496,13 +496,23 @@ if __name__ == "__main__":
         print("📧 Sending Email Alert...")
         print("="*80 + "\n")
 
-        send_email_alert(
-            trade_df=trade_ready,
-            all_signals=signals if signals else [],
-            subject_prefix=f"📊 {scan_label}",
-            position_tracker=position_tracker,
-            action_signals=action_signals
-        )
+        equity_trades, streak_alerts = split_streak_option_alerts(trade_ready)
+        if not equity_trades.empty or has_action_signals:
+            send_email_alert(
+                trade_df=equity_trades,
+                all_signals=signals if signals else [],
+                subject_prefix=f"📊 {scan_label}",
+                position_tracker=position_tracker,
+                action_signals=action_signals
+            )
+        if not streak_alerts.empty:
+            send_email_alert(
+                trade_df=streak_alerts,
+                all_signals=streak_alerts.to_dict("records"),
+                subject_prefix="📈 Streak Option Alert",
+                position_tracker=None,
+                action_signals=None
+            )
     else:
         print("📭 No actionable signals — email skipped")
 
